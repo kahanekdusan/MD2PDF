@@ -619,6 +619,33 @@ function mdToHtml(string $md): array
 //  Ponecháno (font je má): → ← ↔ ★ ✓ ✗ ✚ ⚠ ≈ − ≥ ≤ ∩ a box-drawing.
 //  Nahrazeno (font NEmá – SMP/emoji plane): ✅ ❌ 🔶 🔷 ⭐ ️(VS16)
 // =====================================================================
+// Konfigurovatelné DOSLOVNÉ náhrady textu z configu. Sdílený chokepoint pro
+// tělo/TOC (přes applyGlyphSubstitutions) i pro zdroj mermaid diagramů (aby se
+// normalizace propsala i do popisků v diagramech). Bez klíčů vrací vstup beze
+// změny → no-op, plně zpětně kompatibilní.
+//   'normalize_dashes' => true    dlouhé pomlčky (‒ – — ―) → spojovník '-'
+//   'text_replace' => ['z'=>'na'] libovolné náhrady (smí přebít i výchozí);
+//                                 klíč = hledaný řetězec, hodnota = náhrada.
+function configTextReplace(string $s): string
+{
+    global $CFG;
+    $map = [];
+    if (!empty($CFG['normalize_dashes'])) {
+        $map += [
+            "\u{2012}" => '-',   // FIGURE DASH (‒)
+            "\u{2013}" => '-',   // EN DASH (–)
+            "\u{2014}" => '-',   // EM DASH (—)
+            "\u{2015}" => '-',   // HORIZONTAL BAR (―)
+        ];
+    }
+    foreach (($CFG['text_replace'] ?? []) as $from => $to) {
+        if (is_string($from) && $from !== '' && is_string($to)) {
+            $map[$from] = $to;
+        }
+    }
+    return $map ? strtr($s, $map) : $s;
+}
+
 function applyGlyphSubstitutions(string $html): string
 {
     global $CFG;
@@ -658,6 +685,7 @@ function applyGlyphSubstitutions(string $html): string
         "\u{1F4E5}" => '&#8595;',                                          // 📥 → ↓
     ];
     $html = strtr($html, $map);
+    $html = configTextReplace($html);   // konfigurovatelné náhrady z configu
 
     // Pojistka: jakýkoli zbylý znak z emoji plane (1F000+) nebo dingbats,
     // který DejaVu nemá, odstraníme — kromě explicitně povolených.
@@ -1062,6 +1090,7 @@ function mermaidPuppeteerConfig(): ?string
 function renderMermaidToPng(string $src, string $mmdc): ?string
 {
     global $CFG, $TOOLS_DIR;
+    $src   = configTextReplace($src);   // normalizace i v popiscích diagramů
     $theme = (string) ($CFG['mermaid']['theme'] ?? 'default');
     $bg    = (string) ($CFG['mermaid']['background'] ?? 'white');
     $scale = (string) ($CFG['mermaid']['scale'] ?? 2.5);
@@ -1166,6 +1195,7 @@ function ghostscriptExe(): ?string
 function renderMermaidToSvg(string $src, string $mmdc): ?string
 {
     global $CFG, $TOOLS_DIR;
+    $src   = configTextReplace($src);   // normalizace i v popiscích diagramů
     $theme = (string) ($CFG['mermaid']['theme'] ?? 'default');
     $bg    = (string) ($CFG['mermaid']['background'] ?? 'white');
     $cacheDir = $TOOLS_DIR . DIRECTORY_SEPARATOR . '.mermaid-cache';

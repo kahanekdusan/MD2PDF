@@ -50,6 +50,18 @@ return [
     // jednoho dokumentu). V COMBINE režimu typicky [1, 2] (kapitoly + sekce).
     // 'toc_levels' => [2, 3],
 
+    // --- Normalizace textu (volitelné) -----------------------------------
+    // Doslovné náhrady aplikované při generování v jednom místě: tělo, obsah
+    // (TOC) i popisky v mermaid diagramech; platí pro mpdf i chrome. Zdrojové
+    // .md zůstávají nedotčené — převod dělá engine až při sazbě. Bez obou klíčů
+    // se nic neděje (no-op).
+    //   'normalize_dashes' => true    // dlouhé pomlčky (‒ – — ―) → spojovník '-'
+    //   'text_replace' => [           // libovolné náhrady (smí přebít i výchozí
+    //       '(c)' => '©',             // glyph substituce enginu); klíč = hledaný
+    //       '->'  => '→',             // řetězec, hodnota = čím se nahradí
+    //   ],
+    // 'normalize_dashes' => false,
+
     // --- COMBINE: VÍCE .md → JEDEN PDF -----------------------------------
     // Volitelné. Když 'enabled' => true, engine NEgeneruje jeden PDF na soubor,
     // ale sloučí všechny soubory dle 'glob' do JEDNOHO PDF: jedna titulní strana
