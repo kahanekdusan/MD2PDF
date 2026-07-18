@@ -2075,6 +2075,39 @@ function mpdfNativeTocBody(string $bodyHtml, array $entries, string $tocTitle): 
         . ' toc-preHTML="' . $pre . '" links="on" />' . $bodyHtml;
 }
 
+/**
+ * Zapíše velké HTML po blocích ukončených na bezpečné hranici nadpisu. mPDF uvnitř
+ * AdjustHTML používá PCRE nad celým vstupem jednoho WriteHTML(); rozsáhlý combine
+ * dokument proto může překročit pcre.backtrack_limit, i když je výsledné HTML platné.
+ */
+function mpdfWriteHtmlChunks(\Mpdf\Mpdf $mpdf, string $html, int $maxBytes = 250000): void
+{
+    $parts = preg_split('~(?=<tocentry\b)~u', $html, -1, PREG_SPLIT_NO_EMPTY);
+    if ($parts === false || count($parts) < 2) {
+        $parts = preg_split('~(?=<h[1-6]\b)~u', $html, -1, PREG_SPLIT_NO_EMPTY);
+    }
+    if ($parts === false || $parts === []) {
+        $parts = [$html];
+    }
+
+    $chunks = [];
+    $chunk = '';
+    foreach ($parts as $part) {
+        if ($chunk !== '' && strlen($chunk) + strlen($part) > $maxBytes) {
+            $chunks[] = $chunk;
+            $chunk = '';
+        }
+        $chunk .= $part;
+    }
+    if ($chunk !== '') {
+        $chunks[] = $chunk;
+    }
+
+    foreach ($chunks as $htmlChunk) {
+        $mpdf->WriteHTML($htmlChunk, \Mpdf\HTMLParserMode::HTML_BODY);
+    }
+}
+
 // ---- COMBINE: mPDF renderer -------------------------------------------
 function renderCombined(array $files): array
 {
@@ -2219,9 +2252,9 @@ HTML;
         'ohvalue' => 1, 'ehvalue' => 1, 'ofvalue' => 1, 'efvalue' => 1,
         'resetpagenum' => 1,
     ]);
-    $mpdf->WriteHTML(
+    mpdfWriteHtmlChunks(
+        $mpdf,
         mpdfNativeTocBody($bodyHtml, $toc, (string) ($CFG['strings']['toc_title'] ?? 'Obsah')),
-        \Mpdf\HTMLParserMode::HTML_BODY,
     );
 
     $outName = (string) ($CFG['combine']['output'] ?? 'combined.pdf');
