@@ -282,6 +282,7 @@ function mdToHtml(string $md): array
     $inBq        = false;
     $tableRows   = [];
     $tableAligns = [];
+    $tableCols   = [];           // volitelné šířky sloupců z direktivy <!-- cols: 5 40 10 ... -->
     $inTable     = false;
     $inCode      = false;
     $codeFenceLen = 0;        // délka otevíracího plotu (``` vs ````) — CommonMark nesting
@@ -384,15 +385,31 @@ function mdToHtml(string $md): array
         $bqLines = [];
     };
 
-    $flushTable = function () use (&$inTable, &$tableRows, &$tableAligns, &$html) {
+    $flushTable = function () use (&$inTable, &$tableRows, &$tableAligns, &$tableCols, &$html) {
         if (!$inTable || count($tableRows) < 1) {
+            // pozor: $tableCols se NEmaže — direktiva <!-- cols: … --> smí stát
+            // před tabulkou oddělená prázdným řádkem (ten sem taky doběhne)
             $inTable = false; $tableRows = []; $tableAligns = [];
             return;
         }
         $header = $tableRows[0];
         $body   = array_slice($tableRows, 1);
         $cols   = count($header);
-        $html  .= "<table class=\"md-tab\">\n<thead><tr>";
+        $html  .= "<table class=\"md-tab\">\n";
+        // Volitelné šířky sloupců (relativní váhy) — table-layout:fixed je jinak dělí rovnoměrně
+        if ($tableCols) {
+            $w = array_slice(array_map('floatval', $tableCols), 0, $cols);
+            while (count($w) < $cols) { $w[] = 1.0; }
+            $sum = array_sum($w);
+            if ($sum > 0) {
+                $html .= "<colgroup>";
+                foreach ($w as $ww) {
+                    $html .= '<col style="width:' . round($ww / $sum * 100, 3) . '%" />';
+                }
+                $html .= "</colgroup>\n";
+            }
+        }
+        $html  .= "<thead><tr>";
         foreach ($header as $i => $cell) {
             $a = $tableAligns[$i] ?? 'left';
             $html .= '<th style="text-align:' . $a . '">' . mdInline(trim($cell)) . '</th>';
@@ -408,7 +425,7 @@ function mdToHtml(string $md): array
             $html .= "</tr>\n";
         }
         $html .= "</tbody></table>\n";
-        $inTable = false; $tableRows = []; $tableAligns = [];
+        $inTable = false; $tableRows = []; $tableAligns = []; $tableCols = [];
     };
 
     // ---- hlavní smyčka -------------------------------------------------
@@ -524,6 +541,15 @@ function mdToHtml(string $md): array
             $flushPara(); $flushList(); $flushTable();
             $inBq = true;
             $bqLines[] = $m[1];
+            continue;
+        }
+
+        // Direktiva šířek sloupců pro NÁSLEDUJÍCÍ tabulku: <!-- cols: 5 40 10 10 10 15 -->
+        // Hodnoty jsou relativní váhy (nemusí dávat 100), oddělené mezerou/čárkou.
+        if (preg_match('~^<!--\s*cols\s*:\s*([0-9.,\s]+?)\s*-->$~', $trim, $mCols)) {
+            $flushPara(); $flushList();
+            if ($inTable) { $flushTable(); }
+            $tableCols = preg_split('/[\s,]+/', trim($mCols[1]), -1, PREG_SPLIT_NO_EMPTY);
             continue;
         }
 
