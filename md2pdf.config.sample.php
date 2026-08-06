@@ -50,6 +50,30 @@ return [
     // jednoho dokumentu). V COMBINE režimu typicky [1, 2] (kapitoly + sekce).
     // 'toc_levels' => [2, 3],
 
+    // --- Normalizace textu (volitelné) -----------------------------------
+    // Doslovné náhrady aplikované při generování; platí pro mpdf i chrome.
+    // Zdrojové .md zůstávají nedotčené — převod dělá engine až při sazbě.
+    // Bez těchto klíčů se nic neděje (no-op).
+    //
+    //   'normalize_dashes' => true,   // dlouhé pomlčky (‒ – — ―) → spojovník '-'
+    //                                 // aplikuje se na tělo, TOC, titulku,
+    //                                 // hlavičku i popisky v mermaid diagramech
+    //
+    //   'text_replace' => [           // náhrady v TEXTU dokumentu (tělo, TOC,
+    //       '(c)' => '©',             // titulek, meta řádky); klíč = hledaný
+    //       '(tm)' => '™',            // řetězec, hodnota = čím se nahradí.
+    //   ],                            // Smí přebít i výchozí glyph substituce.
+    //
+    // POZOR: 'text_replace' se ZÁMĚRNĚ neaplikuje na zdroj mermaid diagramů —
+    // obecná náhrada nad syntaxí diagram rozbije (např. '->' => '→' rozseká
+    // šipku '-->' na '-→' a diagram se vůbec nevykreslí). Pokud opravdu
+    // potřebuješ nahrazovat i uvnitř diagramů, je na to samostatný klíč a je
+    // na tobě ohlídat, že náhrada nekoliduje se syntaxí mermaidu:
+    //   'text_replace_mermaid' => ['(c)' => '©'],
+    //
+    // Hodnota náhrady se do těla vkládá jako HTML (lze tedy vložit i značku,
+    // např. '<span class="g-ok">✓</span>'); znaky < > & si escapuj sám.
+
     // --- COMBINE: VÍCE .md → JEDEN PDF -----------------------------------
     // Volitelné. Když 'enabled' => true, engine NEgeneruje jeden PDF na soubor,
     // ale sloučí všechny soubory dle 'glob' do JEDNOHO PDF: jedna titulní strana
