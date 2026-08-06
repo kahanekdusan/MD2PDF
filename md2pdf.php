@@ -619,36 +619,82 @@ function mdToHtml(string $md): array
 //  Ponecháno (font je má): → ← ↔ ★ ✓ ✗ ✚ ⚠ ≈ − ≥ ≤ ∩ a box-drawing.
 //  Nahrazeno (font NEmá – SMP/emoji plane): ✅ ❌ 🔶 🔷 ⭐ ️(VS16)
 // =====================================================================
-// Konfigurovatelné DOSLOVNÉ náhrady textu z configu. Sdílený chokepoint pro
-// tělo/TOC (přes applyGlyphSubstitutions) i pro zdroj mermaid diagramů (aby se
-// normalizace propsala i do popisků v diagramech). Bez klíčů vrací vstup beze
+// Konfigurovatelné DOSLOVNÉ náhrady textu z configu. Bez klíčů vrací vstup beze
 // změny → no-op, plně zpětně kompatibilní.
 //   'normalize_dashes' => true    dlouhé pomlčky (‒ – — ―) → spojovník '-'
-//   'text_replace' => ['z'=>'na'] libovolné náhrady (smí přebít i výchozí);
+//   'text_replace' => ['z'=>'na'] náhrady v TEXTU dokumentu (tělo, TOC, titul);
 //                                 klíč = hledaný řetězec, hodnota = náhrada.
-function configTextReplace(string $s): string
+//   'text_replace_mermaid'        náhrady ve ZDROJI mermaid diagramů — vědomě
+//                                 oddělené, protože obecná náhrada nad syntaxí
+//                                 diagram rozbije (např. '->' rozseká '-->').
+//
+// Vstupní body (podle domény, ne jeden univerzální):
+//   configTextReplaceHtml()    — vygenerované HTML (tělo/TOC): matchuje i
+//                                HTML-escapovanou podobu klíče ('->' i '-&gt;').
+//   configTextReplaceText()    — holý text (titul, hlavička, PDF metadata).
+//   configTextReplaceMermaid() — zdroj diagramu: JEN normalize_dashes
+//                                (+ volitelný 'text_replace_mermaid').
+const CFG_DASH_MAP = [
+    "\u{2012}" => '-',   // FIGURE DASH (‒)
+    "\u{2013}" => '-',   // EN DASH (–)
+    "\u{2014}" => '-',   // EM DASH (—)
+    "\u{2015}" => '-',   // HORIZONTAL BAR (―)
+];
+
+// Náhrady z configu → normalizovaná mapa pro strtr. Numerické klíče PHP
+// přetypuje na int, proto (string) — jinak by 'text_replace' => ['2024'=>…]
+// tiše nefungovalo.
+function configReplaceMap(string $key): array
 {
     global $CFG;
     $map = [];
-    if (!empty($CFG['normalize_dashes'])) {
-        $map += [
-            "\u{2012}" => '-',   // FIGURE DASH (‒)
-            "\u{2013}" => '-',   // EN DASH (–)
-            "\u{2014}" => '-',   // EM DASH (—)
-            "\u{2015}" => '-',   // HORIZONTAL BAR (―)
-        ];
-    }
-    foreach (($CFG['text_replace'] ?? []) as $from => $to) {
-        if (is_string($from) && $from !== '' && is_string($to)) {
-            $map[$from] = $to;
+    foreach (($CFG[$key] ?? []) as $from => $to) {
+        $from = (string) $from;
+        if ($from !== '' && is_scalar($to)) {
+            $map[$from] = (string) $to;
         }
     }
+    return $map;
+}
+
+function configTextReplaceText(string $s): string
+{
+    global $CFG;
+    $map = empty($CFG['normalize_dashes']) ? [] : CFG_DASH_MAP;
+    $map = configReplaceMap('text_replace') + $map;
     return $map ? strtr($s, $map) : $s;
+}
+
+function configTextReplaceHtml(string $html): string
+{
+    global $CFG;
+    $map = empty($CFG['normalize_dashes']) ? [] : CFG_DASH_MAP;
+    $map = configReplaceMap('text_replace') + $map;
+    // Tělo prošlo htmlspecialchars(), takže '->' je v HTML '-&gt;'. Zaregistruj
+    // i escapovanou podobu klíče, jinak by náhrada v textu tiše nikdy nesedla.
+    foreach ($map as $from => $to) {
+        $from = (string) $from;   // numerický klíč pole je int, viz configReplaceMap()
+        $esc  = htmlspecialchars($from, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if ($esc !== $from && !isset($map[$esc])) { $map[$esc] = $to; }
+    }
+    return $map ? strtr($html, $map) : $html;
+}
+
+function configTextReplaceMermaid(string $src): string
+{
+    global $CFG;
+    $map = empty($CFG['normalize_dashes']) ? [] : CFG_DASH_MAP;
+    $map = configReplaceMap('text_replace_mermaid') + $map;
+    return $map ? strtr($src, $map) : $src;
 }
 
 function applyGlyphSubstitutions(string $html): string
 {
     global $CFG;
+    // Náhrady z configu JAKO PRVNÍ — aby klíč mohl sedět i na syrový emoji znak
+    // a config tak směl přebít výchozí glyph substituce; vložená hodnota pak
+    // projde stejnou font-safety pipeline (mapa níže + pojistka na konci).
+    $html = configTextReplaceHtml($html);
     $tip  = htmlspecialchars($CFG['strings']['label_tip']  ?? 'TIP:',  ENT_QUOTES, 'UTF-8');
     $note = htmlspecialchars($CFG['strings']['label_note'] ?? 'POZN:', ENT_QUOTES, 'UTF-8');
     $map = [
@@ -685,7 +731,6 @@ function applyGlyphSubstitutions(string $html): string
         "\u{1F4E5}" => '&#8595;',                                          // 📥 → ↓
     ];
     $html = strtr($html, $map);
-    $html = configTextReplace($html);   // konfigurovatelné náhrady z configu
 
     // Pojistka: jakýkoli zbylý znak z emoji plane (1F000+) nebo dingbats,
     // který DejaVu nemá, odstraníme — kromě explicitně povolených.
@@ -1090,7 +1135,7 @@ function mermaidPuppeteerConfig(): ?string
 function renderMermaidToPng(string $src, string $mmdc): ?string
 {
     global $CFG, $TOOLS_DIR;
-    $src   = configTextReplace($src);   // normalizace i v popiscích diagramů
+    $src   = configTextReplaceMermaid($src);   // normalizace i v popiscích diagramů
     $theme = (string) ($CFG['mermaid']['theme'] ?? 'default');
     $bg    = (string) ($CFG['mermaid']['background'] ?? 'white');
     $scale = (string) ($CFG['mermaid']['scale'] ?? 2.5);
@@ -1120,7 +1165,17 @@ function renderMermaidToPng(string $src, string $mmdc): ?string
     if ($rc === 0 && is_file($png) && filesize($png) > 0) {
         return str_replace('\\', '/', $png);
     }
+    warnMermaidFailed($o);
     return null;
+}
+
+// Selhaný diagram degraduje na code block — bez hlášky je to tichá ztráta
+// obsahu (typicky když 'text_replace_mermaid' rozbije syntaxi).
+function warnMermaidFailed(array $out): void
+{
+    $msg = trim(implode(' ', array_slice($out, 0, 3)));
+    fwrite(STDERR, "  (mermaid: diagram se nevykreslil → ponechán jako code block"
+        . ($msg !== '' ? '; ' . mb_strimwidth($msg, 0, 160, '…') : '') . ")\n");
 }
 
 function preprocessMermaid(string $md): string
@@ -1195,7 +1250,7 @@ function ghostscriptExe(): ?string
 function renderMermaidToSvg(string $src, string $mmdc): ?string
 {
     global $CFG, $TOOLS_DIR;
-    $src   = configTextReplace($src);   // normalizace i v popiscích diagramů
+    $src   = configTextReplaceMermaid($src);   // normalizace i v popiscích diagramů
     $theme = (string) ($CFG['mermaid']['theme'] ?? 'default');
     $bg    = (string) ($CFG['mermaid']['background'] ?? 'white');
     $cacheDir = $TOOLS_DIR . DIRECTORY_SEPARATOR . '.mermaid-cache';
@@ -1212,7 +1267,9 @@ function renderMermaidToSvg(string $src, string $mmdc): ?string
     if ($pptr !== null) { $args[] = '-p'; $args[] = $pptr; }
     $cmd = implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1';
     @exec($cmd, $o, $rc);
-    return ($rc === 0 && is_file($svgPath) && filesize($svgPath) > 0) ? $svgPath : null;
+    if ($rc === 0 && is_file($svgPath) && filesize($svgPath) > 0) { return $svgPath; }
+    warnMermaidFailed($o);
+    return null;
 }
 
 // fence s volitelnými atributy v info-stringu: ```mermaid height=120mm
@@ -1319,7 +1376,7 @@ function renderDocumentChrome(string $mdPath): array
 
     $meta  = parseMeta($md);
     $split = splitTitle($md);
-    $title = $split['title'];
+    $title = configTextReplaceText($split['title']);   // titulka/hlavička/metadata stejně jako tělo
 
     // poznámky pod čarou: vyřízni definice, očísluj reference (před parserem)
     $fn = preprocessFootnotes($split['body']);
@@ -1384,6 +1441,7 @@ function renderDocumentChrome(string $mdPath): array
                   . htmlspecialchars($r[0], ENT_QUOTES, 'UTF-8') . '</td>'
                   . '<td class="cover-meta-value">' . $r[1] . '</td></tr>';
     }
+    $metaRows = configTextReplaceHtml($metaRows);
     $dkRaw   = (string) ($CFG['doc_kind'] ?? '');
     $dk      = htmlspecialchars($dkRaw, ENT_QUOTES, 'UTF-8');
     $eyebrow = $BRAND !== ''
@@ -1577,7 +1635,7 @@ function renderDocument(string $mdPath): array
 
     $meta  = parseMeta($md);
     $split = splitTitle($md);
-    $title = $split['title'];
+    $title = configTextReplaceText($split['title']);   // titulka/hlavička/metadata stejně jako tělo
 
     // poznámky pod čarou: vyřízni definice, očísluj reference (před parserem)
     $fn = preprocessFootnotes($split['body']);
@@ -1631,6 +1689,7 @@ function renderDocument(string $mdPath): array
                   . htmlspecialchars($r[0], ENT_QUOTES, 'UTF-8') . '</td>'
                   . '<td class="cover-meta-value">' . $r[1] . '</td></tr>';
     }
+    $metaRows = configTextReplaceHtml($metaRows);
 
     // eyebrow nad titulkem: „{doc_kind} · {brand}"
     $dkRaw   = (string) ($CFG['doc_kind'] ?? '');
@@ -1987,7 +2046,7 @@ function combineCoverParts(): array
 {
     global $CFG, $AUTHOR, $COMPANY, $BRAND;
     $C        = $CFG['combine'] ?? [];
-    $title    = htmlspecialchars((string) ($C['title'] ?? ($CFG['strings']['default_title'] ?? 'Dokument')), ENT_QUOTES, 'UTF-8');
+    $title    = htmlspecialchars(configTextReplaceText((string) ($C['title'] ?? ($CFG['strings']['default_title'] ?? 'Dokument'))), ENT_QUOTES, 'UTF-8');
     $subtitle = (string) ($C['subtitle'] ?? '');
     $purpose  = $subtitle !== ''
         ? '<div class="cover-purpose">' . applyGlyphSubstitutions(mdInline($subtitle)) . '</div>'
@@ -2021,7 +2080,8 @@ function combineCoverParts(): array
                   . htmlspecialchars((string) $r[0], ENT_QUOTES, 'UTF-8') . '</td>'
                   . '<td class="cover-meta-value">' . $r[1] . '</td></tr>';
     }
-    return ['eyebrow' => $eyebrow, 'title' => $title, 'purpose' => $purpose, 'metaRows' => $metaRows];
+    return ['eyebrow' => $eyebrow, 'title' => $title, 'purpose' => $purpose,
+            'metaRows' => configTextReplaceHtml($metaRows)];
 }
 
 // Průběžný obsah pro combine (H1 kapitoly tučně, H2 sekce odsazené).
