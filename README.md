@@ -24,6 +24,7 @@
 - **Obsah (TOC)** automaticky z `##` nadpisů (když jsou aspoň 4).
 - **Hlavička a patička** + čísla stran v těle (titulka nečíslovaná); texty plně z configu (lokalizace).
 - **Callout boxy** z blockquote; „varovné" (oranžové) podle klíčových slov.
+- **Dvě barevná témata** — `violet` (výrazné, prezentační) nebo `serious` (grafitová, střízlivá — pro úřední/firemní dokumenty); přepíná se v configu, jednotlivé barvy jdou doladit.
 - **Mermaid diagramy** — renderer `chrome` vkládá ostré **vektorové SVG**, renderer `mpdf` PNG přes [mermaid-cli](https://github.com/mermaid-js/mermaid-cli).
 - **Auto-fit** širokých code-bloků (ASCII diagramy) a tabulek; dlouhé tokeny (DNS/base64) se zalomí.
 - **Embedované volné fonty** (Source Sans 3 + Cascadia Mono + DejaVu záloha) → PDF vypadá všude stejně a je legálně přenositelné.
@@ -50,6 +51,32 @@ Engine umí **dva renderery** (přepínač `renderer` v configu):
 - **`chrome`** — sazba přes headless Chrome + GhostScript: **vektorový mermaid (SVG)**, downsample obrázků. Vyžaduje Node (puppeteer), Chrome/Edge a GhostScript; když Chrome chybí, spadne automaticky zpět na `mpdf`.
 
 Titulní strana je u obou **stejná** (full-bleed pozadí, bez hlavičky/patičky/čísla; běžící hlavička/patička + čísla stran jen v těle). Nastavení chrome rendereru (`chrome.image_dpi`, `chrome.margins`, cesty k `exe`/`gs`) viz [`md2pdf.config.sample.php`](md2pdf.config.sample.php).
+
+## Barevné téma
+
+Engine má **dvě vestavěné palety** (přepínač `theme` v configu, případně `--theme=` na CLI). Rozvržení a typografie jsou u obou identické — mění se jen barvy:
+
+| Téma | Vzhled | Kdy |
+|------|--------|-----|
+| `violet` (default) | fialový branding, výrazný akcent | prezentace, produktová a interní dokumentace |
+| `serious` | grafitově-černá se střízlivým vínovým akcentem: černá hlavička tabulky, šedé podklady, barva jen jako akcent | úřední/firemní dokumenty — upomínky, vyúčtování, smlouvy, reporty |
+
+```php
+'theme' => 'serious',
+```
+
+Jednotlivé barvy lze doladit klíčem `theme_colors` (přebíjí paletu token po tokenu; seznam tokenů viz `THEME_PALETTES` v `md2pdf.php`):
+
+```php
+'theme_colors' => ['accent' => '#8f1d1d', 'cover_bg' => '#0f172a'],
+```
+
+Když se má tentýž zdroj vysázet v obou variantách vedle sebe, přidej k výstupu příponu (`output_suffix` v configu nebo `--suffix=`):
+
+```bash
+php md2pdf.php                                  # README.pdf          (violet)
+php md2pdf.php --theme=serious --suffix=-serious # README-serious.pdf (serious)
+```
 
 ## Instalace
 
@@ -102,6 +129,9 @@ PDF vzniknou v `output_dir` (defaultně `{source_dir}/pdf`).
 php md2pdf.php                       # všechny soubory dle 'glob' z configu
 php md2pdf.php NazevDokumentu        # jen jeden (basename, .md volitelné)
 php md2pdf.php --config=jiny.php     # jiná konfigurace
+php md2pdf.php --renderer=chrome     # přebije 'renderer' z configu (mpdf|chrome)
+php md2pdf.php --theme=serious       # přebije 'theme' z configu (violet|serious)
+php md2pdf.php --suffix=-serious     # přípona názvu PDF (README-serious.pdf)
 php md2pdf.php --print-config        # vypíše JSON {source_dir,output_dir,glob}
 ```
 
@@ -130,6 +160,9 @@ Config je PHP soubor vracející pole. Plně okomentovaný vzor je [`md2pdf.conf
 | `combine` | sloučení více `.md` do jednoho PDF (viz [Combine](#combine)) |
 | `renderer` | `'mpdf'` (default) nebo `'chrome'` (vektorový mermaid) |
 | `chrome` | nastavení chrome rendereru (`exe`, `gs`, `image_dpi`, `margins`) |
+| `theme` | barevná paleta: `'violet'` (default) nebo `'serious'` (viz [Barevné téma](#barevné-téma)) |
+| `theme_colors` | doladění jednotlivých barev tématu (`['accent'=>'#…', …]`) |
+| `output_suffix` | přípona názvu výstupního PDF (`'-serious'` → `Dokument-serious.pdf`) |
 | `mermaid` | render mermaidu (viz níže) |
 
 ## Konvence Markdownu
@@ -245,6 +278,7 @@ Radek Hulán — [https://mywebdesign.cz/](https://mywebdesign.cz/)
 - **Table of contents** auto-generated from `##` headings (when there are at least 4).
 - **Header & footer** + page numbers in the body (cover unnumbered); all text comes from the config (localization).
 - **Callout boxes** from blockquotes; "warning" (orange) by keyword match.
+- **Two colour themes** — `violet` (bold, presentation-grade) or `serious` (graphite, restrained — for official/corporate documents); switched in the config, individual colours tunable.
 - **Mermaid diagrams** — the `chrome` renderer embeds crisp **vector SVG**, the `mpdf` renderer PNG via [mermaid-cli](https://github.com/mermaid-js/mermaid-cli).
 - **Auto-fit** of wide code blocks (ASCII diagrams) and tables; long tokens (DNS/base64) wrap.
 - **Embedded free fonts** (Source Sans 3 + Cascadia Mono + DejaVu fallback) → PDF looks the same everywhere and is legally redistributable.
@@ -271,6 +305,32 @@ The engine has **two renderers** (the `renderer` switch in the config):
 - **`chrome`** — typeset via headless Chrome + GhostScript: **vector mermaid (SVG)**, image downsampling. Requires Node (puppeteer), Chrome/Edge and GhostScript; if Chrome is missing it falls back to `mpdf`.
 
 The cover page is **identical** for both (full-bleed background, no header/footer/page-number; running header/footer + page numbers only in the body). Chrome renderer settings (`chrome.image_dpi`, `chrome.margins`, paths to `exe`/`gs`) — see [`md2pdf.config.sample.php`](md2pdf.config.sample.php).
+
+## Colour theme
+
+The engine ships **two palettes** (the `theme` switch in the config, or `--theme=` on the CLI). Layout and typography are identical for both — only colours change:
+
+| Theme | Look | Use for |
+|-------|------|---------|
+| `violet` (default) | violet branding, strong accent | presentations, product and internal documentation |
+| `serious` | graphite/black with a restrained maroon accent: black table header, grey surfaces, colour used only as an accent | official/corporate documents — reminders, statements, contracts, reports |
+
+```php
+'theme' => 'serious',
+```
+
+Individual colours can be tuned via `theme_colors` (overrides the palette token by token; token list in `THEME_PALETTES` in `md2pdf.php`):
+
+```php
+'theme_colors' => ['accent' => '#8f1d1d', 'cover_bg' => '#0f172a'],
+```
+
+To typeset the same source in both variants side by side, add an output suffix (`output_suffix` in the config or `--suffix=`):
+
+```bash
+php md2pdf.php                                   # README.pdf          (violet)
+php md2pdf.php --theme=serious --suffix=-serious # README-serious.pdf (serious)
+```
 
 ## Install
 
@@ -323,6 +383,9 @@ PDFs are written to `output_dir` (defaults to `{source_dir}/pdf`).
 php md2pdf.php                       # all files matching 'glob' from the config
 php md2pdf.php DocumentName          # only one (basename, .md optional)
 php md2pdf.php --config=other.php    # different configuration
+php md2pdf.php --renderer=chrome     # overrides 'renderer' from the config (mpdf|chrome)
+php md2pdf.php --theme=serious       # overrides 'theme' from the config (violet|serious)
+php md2pdf.php --suffix=-serious     # output filename suffix (README-serious.pdf)
 php md2pdf.php --print-config        # prints JSON {source_dir,output_dir,glob}
 ```
 
@@ -351,6 +414,9 @@ The config is a PHP file returning an array. A fully commented template is [`md2
 | `combine` | merge many `.md` into one PDF (see [Combine](#combine-1)) |
 | `renderer` | `'mpdf'` (default) or `'chrome'` (vector mermaid) |
 | `chrome` | chrome renderer settings (`exe`, `gs`, `image_dpi`, `margins`) |
+| `theme` | colour palette: `'violet'` (default) or `'serious'` (see [Colour theme](#colour-theme)) |
+| `theme_colors` | per-token tweaks of the active palette (`['accent'=>'#…', …]`) |
+| `output_suffix` | output filename suffix (`'-serious'` → `Document-serious.pdf`) |
 | `mermaid` | mermaid rendering (see below) |
 
 ## Markdown conventions

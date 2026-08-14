@@ -21,6 +21,11 @@ return [
     'output_dir' => null,                      // null = {source_dir}/pdf
     'glob'       => '*.md',                     // výběr souborů, např. 'Projekt_*.md'
 
+    // Volitelná přípona názvu výstupního PDF (Dokument.md → Dokument-serious.pdf).
+    // Hodí se, když se tentýž zdroj sází ve dvou barevných variantách vedle sebe.
+    // Přebít lze i z příkazové řádky: --suffix=-serious
+    // 'output_suffix' => '',
+
     // Jak naložit s úvodním blockquote hned po H1:
     //   'meta' (default) = je to metablok (Verze/Datum/Autor/Účel) → vyřízne se
     //                      a hodnoty jdou na titulku
@@ -116,6 +121,29 @@ return [
     // Titulní strana je u OBOU stejná: full-bleed, bez hlavičky/patičky/čísla;
     // header/footer + čísla stran běží jen v těle.
     'renderer' => 'mpdf',
+
+    // --- Barevné téma -----------------------------------------------------
+    // 'violet' (DEFAULT) = fialový branding — výrazné, prezentační dokumenty.
+    // 'serious'          = grafitově-černá se střízlivým vínovým akcentem;
+    //                      černá hlavička tabulky, šedé podklady, barva jen
+    //                      jako akcent. Pro úřední/firemní dokumenty (upomínky,
+    //                      vyúčtování, smlouvy, reporty).
+    // Přebít lze i z příkazové řádky: --theme=serious
+    'theme' => 'violet',
+
+    // Volitelné doladění jednotlivých barev aktivního tématu. Přebíjí paletu
+    // token po tokenu; neuvedené tokeny zůstávají z tématu. Dostupné tokeny
+    // (viz THEME_PALETTES v md2pdf.php):
+    //   text, muted, muted2, border, primary, primary_dark, primary_mid,
+    //   accent, heading_rule, link, surface, surface_border, table_zebra,
+    //   callout_bg, callout_border, warn_bg, warn_border, warn_fg,
+    //   code_bg, code_fg, cover_bg, cover_rule, cover_eyebrow, cover_purpose,
+    //   cover_meta_label, cover_meta_value, cover_meta_border,
+    //   ok, no, amber, amber2, info, info2, gray
+    // 'theme_colors' => [
+    //     'accent'   => '#8f1d1d',
+    //     'cover_bg' => '#0f172a',
+    // ],
 
     // Nastavení chrome rendereru (uplatní se jen pro 'renderer' => 'chrome').
     'chrome' => [
