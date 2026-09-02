@@ -130,6 +130,15 @@ if ($printConfig) {
 //                         tabulky, šedé podklady, barva jen jako akcent)
 //  Jednotlivé tokeny lze v configu přebít klíčem 'theme_colors' => [...].
 // =====================================================================
+
+// Interní značka tvrdého zalomení řádku uvnitř odstavce (CommonMark hard
+// break: dvě mezery nebo `\` na konci řádku). Do textu se vkládá JEŠTĚ PŘED
+// mdInline(), protože ta HTML escapuje — hotové `<br>` by se vypsalo doslova.
+// Řídicí znak \x02 se v MD zdroji nevyskytuje, projde htmlspecialchars beze
+// změny a žádný inline vzor (bold/kurzíva/kód/odkaz) ho nechytí.
+const MD_HARD_BREAK = "\x02HB\x02";
+const MD_HARD_BREAK_RE = '/ {2,}$|(?<!\\\\)\\\\$/';
+
 const THEME_PALETTES = [
 
     // ---- fialová (původní branding) -----------------------------------
@@ -432,12 +441,20 @@ function mdToHtml(string $md): array
     $flushPara = function () use (&$paragraph, &$html) {
         if (!$paragraph) { return; }
         $text = implode(' ', $paragraph);
+        // Tvrdé zalomení: značka byla přilepena na konec řádku, spojovací mezera
+        // za ní je navíc → pryč, ať <br> nezačíná mezerou. Značka na úplném konci
+        // odstavce nedává smysl (za ní už nic není) → zahodit.
+        $text = str_replace(MD_HARD_BREAK . ' ', MD_HARD_BREAK, $text);
+        while (substr($text, -strlen(MD_HARD_BREAK)) === MD_HARD_BREAK) {
+            $text = substr($text, 0, -strlen(MD_HARD_BREAK));
+        }
         // Popisek obrázku: samostatný kurzívový řádek hned za <figure> → vycentrovat.
         $afterFig = (substr(rtrim($html), -11) === '<!--/fig-->');
         $t = trim($text);
         $isCaption = $afterFig && count($paragraph) === 1
             && (preg_match('/^\*[^*]+\*$/u', $t) || preg_match('/^_[^_]+_$/u', $t));
-        $html .= ($isCaption ? '<p class="fig-cap">' : '<p>') . mdInline($text) . "</p>\n";
+        $inline = str_replace(MD_HARD_BREAK, '<br>', mdInline($text));
+        $html .= ($isCaption ? '<p class="fig-cap">' : '<p>') . $inline . "</p>\n";
         $paragraph = [];
     };
 
@@ -761,7 +778,14 @@ function mdToHtml(string $md): array
         if ($paragraph && preg_match('/^\*\*[^*]+(?::\*\*|\*\*\s+—)/u', $trim)) {
             $flushPara();
         }
-        $paragraph[] = $trim;
+        // Tvrdé zalomení uvnitř odstavce (CommonMark): dvě a více mezer NEBO `\`
+        // na konci řádku. Typický případ jsou podpisy a adresní bloky, kde by
+        // spojení do jednoho odstavce bylo špatně. Značku řeší $flushPara().
+        if (preg_match(MD_HARD_BREAK_RE, rtrim($line, "\r\n"))) {
+            $paragraph[] = rtrim($trim, '\\') . MD_HARD_BREAK;
+        } else {
+            $paragraph[] = $trim;
+        }
     }
 
     $flushPara(); $flushList(); $flushBq(); $flushTable();

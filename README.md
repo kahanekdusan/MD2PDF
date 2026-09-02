@@ -19,7 +19,7 @@
 ## Vlastnosti
 
 - **Dva renderery** — `mpdf` (default, čistě PHP, bez závislostí) nebo `chrome` (vektorový mermaid přes headless Chrome + GhostScript); přepíná se v configu, výstup je vizuálně sjednocený.
-- **Vlastní Markdown parser** (nadpisy, seznamy vč. vnořených a checkboxů, GFM tabulky se zarovnáním a zalomením buněk, blockquote/callouty, kód, obrázky, HR, **poznámky pod čarou `[^1]`**, odkazy vč. interních kotev a **autolinků `<url>`**, inline `**bold**`/`*italic*`/`~~strike~~`/`code` a **escapování `\*`**).
+- **Vlastní Markdown parser** (nadpisy, seznamy vč. vnořených a checkboxů, GFM tabulky se zarovnáním a zalomením buněk, blockquote/callouty, kód, obrázky, HR, **poznámky pod čarou `[^1]`**, odkazy vč. interních kotev a **autolinků `<url>`**, inline `**bold**`/`*italic*`/`~~strike~~`/`code`, **escapování `\*`** a **tvrdé zalomení řádku** dvěma mezerami nebo `\` na konci řádku).
 - **Titulní strana** s brandingem — titul z `# H1`, podtitul/účel a metadata (verze, datum, autor) z úvodního blockquote, logo dole; **full-bleed** pozadí bez hlavičky/patičky.
 - **Obsah (TOC)** automaticky z `##` nadpisů (když jsou aspoň 4).
 - **Hlavička a patička** + čísla stran v těle (titulka nečíslovaná); texty plně z configu (lokalizace).
@@ -181,6 +181,37 @@ Config je PHP soubor vracející pole. Plně okomentovaný vzor je [`md2pdf.conf
 - **Callouty:** každý blockquote se vykreslí jako box; obsahuje-li `⚠`/`POZOR`/… (dle `warn_keywords`), je oranžový.
 - **Obrázky:** `![popis](cesta.png)` — relativní cesty se berou vůči `source_dir`.
 - **Mermaid:** blok s jazykem `mermaid` → vyrenderovaný diagram (viz níže).
+- **Tvrdé zalomení řádku (podpisy, adresy):** viz níže.
+
+### Podpis, adresa a jiné bloky řádků pod sebou
+
+Řádky jednoho odstavce se standardně slévají do plynulého textu — to je správně pro
+prózu, ale rozbije to podpis nebo adresu. Tvrdé zalomení se zapíše podle CommonMark
+**dvěma mezerami** nebo **zpětným lomítkem** na konci řádku:
+
+```markdown
+S pozdravem
+
+**Jan Novák**\
+Firma s.r.o.\
+jan@firma.cz · +420 123 456 789
+```
+
+Obojí funguje stejně; `\` je vidět v editoru, dvě mezery ne — proto **doporučuji `\`**.
+Zalomení funguje v odstavcích i uvnitř blockquote (callouty, metablok).
+
+> ⚠ **`<br>` nefunguje** a vypíše se doslova. Engine veškeré HTML ve zdroji escapuje
+> záměrně, aby dokument nešlo rozbít vloženou značkou.
+
+Alternativou je napsat každý řádek jako **samostatný odstavec** (prázdný řádek mezi nimi).
+Funguje to taky, jen s větší mezerou mezi řádky — pro podpis je tvrdé zalomení hezčí.
+
+Pozor na dva vedlejší efekty:
+
+- Pokud řádek **omylem** končí dvěma mezerami, vznikne zalomení. Většina editorů umí
+  trailing whitespace ořezávat při uložení; vyplatí se to zapnout.
+- Řádek začínající **tučným labelem s dvojtečkou** (`**Sídlo:** …`) engine i bez zalomení
+  odsazuje do vlastního odstavce — u adresních bloků tedy zalomení psát nemusíš.
 
 ## Combine
 
@@ -273,7 +304,7 @@ Radek Hulán — [https://mywebdesign.cz/](https://mywebdesign.cz/)
 ## Features
 
 - **Two renderers** — `mpdf` (default, pure PHP, no deps) or `chrome` (vector mermaid via headless Chrome + GhostScript); switched in the config, visually unified output.
-- **Custom Markdown parser** (headings, lists incl. nested & checkboxes, GFM tables with alignment & cell wrapping, blockquotes/callouts, code, images, HR, **footnotes `[^1]`**, links incl. internal anchors and **autolinks `<url>`**, inline `**bold**`/`*italic*`/`~~strike~~`/`code` and **escaping `\*`**).
+- **Custom Markdown parser** (headings, lists incl. nested & checkboxes, GFM tables with alignment & cell wrapping, blockquotes/callouts, code, images, HR, **footnotes `[^1]`**, links incl. internal anchors and **autolinks `<url>`**, inline `**bold**`/`*italic*`/`~~strike~~`/`code`, **escaping `\*`** and **hard line breaks** via two trailing spaces or a trailing `\`).
 - **Cover page** with branding — title from `# H1`, subtitle/purpose and metadata (version, date, author) from the leading blockquote, logo at the bottom; **full-bleed** background, no header/footer.
 - **Table of contents** auto-generated from `##` headings (when there are at least 4).
 - **Header & footer** + page numbers in the body (cover unnumbered); all text comes from the config (localization).
@@ -435,6 +466,29 @@ The config is a PHP file returning an array. A fully commented template is [`md2
 - **Callouts:** every blockquote renders as a box; if it contains a `warn_keywords` term it turns orange.
 - **Images:** `![alt](path.png)` — relative paths resolve against `source_dir`.
 - **Mermaid:** a `mermaid` block → a rendered diagram (see below).
+
+### Signatures, addresses and other stacked lines
+
+Lines of one paragraph are merged into flowing text — correct for prose, wrong for a
+signature block. Use a CommonMark hard break: **two trailing spaces** or a **trailing
+backslash**.
+
+```markdown
+Best regards,
+
+**John Doe**\
+Company Ltd.\
+john@company.com · +420 123 456 789
+```
+
+Both work; `\` is visible in the editor, trailing spaces are not — so **prefer `\`**.
+Hard breaks work in paragraphs and inside blockquotes (callouts, meta block).
+
+> ⚠ **`<br>` does not work** and is printed literally — the engine escapes all HTML in
+> the source on purpose, so a stray tag cannot break the document.
+
+You can also write each line as a **separate paragraph** (blank line between them); that
+works too, just with wider spacing.
 
 ## Combine
 
