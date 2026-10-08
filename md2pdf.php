@@ -955,20 +955,20 @@ function parseMeta(string $md): array
     }
     $head = implode("\n", $bq);
 
-    if (preg_match('/\*\*' . $lVer . ':\*\*\s*([^·\n]+?)(?:\s*·|\n|$)/u', $head, $m)) {
+    if (preg_match('/(?:\*\*)?' . $lVer . ':(?:\*\*)?\s*([^·\n]+?)(?:\s*·|\n|$)/u', $head, $m)) {
         $meta['version'] = trim($m[1]);
     }
-    if (preg_match('/\*\*' . $lDat . ':\*\*\s*([^·\n]+?)(?:\s*·|\n|$)/u', $head, $m)) {
+    if (preg_match('/(?:\*\*)?' . $lDat . ':(?:\*\*)?\s*([^·\n]+?)(?:\s*·|\n|$)/u', $head, $m)) {
         $meta['date'] = trim($m[1]);
     }
-    if (preg_match('/\*\*' . $lAut . ':\*\*\s*([^·\n]+?)(?:\s*·|\n|$)/u', $head, $m)) {
+    if (preg_match('/(?:\*\*)?' . $lAut . ':(?:\*\*)?\s*([^·\n]+?)(?:\s*·|\n|$)/u', $head, $m)) {
         $meta['docAuthor'] = trim($m[1]);
     }
     // Účel: vícerádkový — sbírej pokračovací řádky, dokud věta nekončí
     // tečkou/!/? nebo nenarazíme na další **Label:** řádek (max 4 řádky).
     $bqN = count($bq);
     for ($k = 0; $k < $bqN; $k++) {
-        if (preg_match('/\*\*' . $lUce . ':\*\*\s*(.*)$/u', $bq[$k], $m)) {
+        if (preg_match('/^(?:\*\*)?' . $lUce . ':(?:\*\*)?\s*(.*)$/u', $bq[$k], $m)) {
             $parts = [trim($m[1])];
             for ($j = $k + 1; $j < $bqN && count($parts) < 4; $j++) {
                 $nl = trim($bq[$j]);
