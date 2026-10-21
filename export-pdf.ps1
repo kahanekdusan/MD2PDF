@@ -24,11 +24,21 @@
     Chrome/Edge + GhostScript, vektorovy mermaid). Kdyz neni zadan, pouzije se
     'renderer' z md2pdf.config.php.
 
+.PARAMETER Theme
+    Prebije barevne tema z configu: 'violet' (fialovy branding) nebo 'serious'
+    (grafitove-cerna se strizlivym vinovym akcentem). Kdyz neni zadano, pouzije
+    se 'theme' z md2pdf.config.php (default 'violet').
+
+.PARAMETER Suffix
+    Pripona nazvu vystupniho PDF (napr. '-serious' -> README-serious.pdf).
+    Umozni vysazet tentyz zdroj ve dvou variantach vedle sebe.
+
 .EXAMPLE
     pwsh -File export-pdf.ps1 -Config C:\projekt\tools\md2pdf.config.php
     pwsh -File export-pdf.ps1 -Config ...\md2pdf.config.php -Preview
     pwsh -File export-pdf.ps1 -Config ...\md2pdf.config.php -Only MujDokument
     pwsh -File export-pdf.ps1 -Config ...\md2pdf.config.php -Renderer chrome
+    pwsh -File export-pdf.ps1 -Theme serious -Suffix '-serious'
 #>
 [CmdletBinding()]
 param(
@@ -36,7 +46,10 @@ param(
     [switch]$Preview,
     [string]$Only,
     [ValidateSet('mpdf', 'chrome')]
-    [string]$Renderer
+    [string]$Renderer,
+    [ValidateSet('violet', 'serious')]
+    [string]$Theme,
+    [string]$Suffix
 )
 
 $ErrorActionPreference = 'Stop'
@@ -87,8 +100,10 @@ Write-Host "Config: $Config"
 Write-Host ""
 
 $phpArgs = @($Script, "--config=$Config")
-if ($Renderer) { $phpArgs += "--renderer=$Renderer" }
-if ($Only)     { $phpArgs += $Only }
+if ($Renderer)                       { $phpArgs += "--renderer=$Renderer" }
+if ($Theme)                          { $phpArgs += "--theme=$Theme" }
+if ($PSBoundParameters.ContainsKey('Suffix')) { $phpArgs += "--suffix=$Suffix" }
+if ($Only)                           { $phpArgs += $Only }
 
 & $Php @phpArgs
 $exit = $LASTEXITCODE
@@ -122,7 +137,8 @@ if ($Preview) {
         # smaz stare nahledy
         Get-ChildItem $PrevDir -Filter '*.png' -ErrorAction SilentlyContinue | Remove-Item -Force
         $pdfs = Get-ChildItem $OutDir -Filter '*.pdf'
-        if ($Only) { $pdfs = $pdfs | Where-Object { $_.BaseName -eq $Only } }
+        # -Only filtruje na basename; pri -Suffix se soubor jmenuje "<Only><Suffix>.pdf"
+        if ($Only) { $pdfs = $pdfs | Where-Object { $_.BaseName -eq ($Only + $Suffix) } }
         foreach ($pdf in $pdfs) {
             $outPat = Join-Path $PrevDir ("{0}-p%02d.png" -f $pdf.BaseName)
             & $gs -q -dNOPAUSE -dBATCH -sDEVICE=png16m -r110 `

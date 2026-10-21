@@ -19,11 +19,12 @@
 ## Vlastnosti
 
 - **Dva renderery** — `mpdf` (default, čistě PHP, bez závislostí) nebo `chrome` (vektorový mermaid přes headless Chrome + GhostScript); přepíná se v configu, výstup je vizuálně sjednocený.
-- **Vlastní Markdown parser** (nadpisy, seznamy vč. vnořených a checkboxů, GFM tabulky se zarovnáním a zalomením buněk, blockquote/callouty, kód, obrázky, HR, **poznámky pod čarou `[^1]`**, odkazy vč. interních kotev a **autolinků `<url>`**, inline `**bold**`/`*italic*`/`~~strike~~`/`code` a **escapování `\*`**).
+- **Vlastní Markdown parser** (nadpisy, seznamy vč. vnořených a checkboxů, GFM tabulky se zarovnáním a zalomením buněk, blockquote/callouty, kód, obrázky, HR, **poznámky pod čarou `[^1]`**, odkazy vč. interních kotev a **autolinků `<url>`**, inline `**bold**`/`*italic*`/`~~strike~~`/`code`, **escapování `\*`** a **tvrdé zalomení řádku** dvěma mezerami nebo `\` na konci řádku).
 - **Titulní strana** s brandingem — titul z `# H1`, podtitul/účel a metadata (verze, datum, autor) z úvodního blockquote, logo dole; **full-bleed** pozadí bez hlavičky/patičky.
 - **Obsah (TOC)** automaticky z `##` nadpisů (když jsou aspoň 4).
 - **Hlavička a patička** + čísla stran v těle (titulka nečíslovaná); texty plně z configu (lokalizace).
 - **Callout boxy** z blockquote; „varovné" (oranžové) podle klíčových slov.
+- **Dvě barevná témata** — `violet` (výrazné, prezentační) nebo `serious` (grafitová, střízlivá — pro úřední/firemní dokumenty); přepíná se v configu, jednotlivé barvy jdou doladit.
 - **Mermaid diagramy** — renderer `chrome` vkládá ostré **vektorové SVG**, renderer `mpdf` PNG přes [mermaid-cli](https://github.com/mermaid-js/mermaid-cli).
 - **Auto-fit** širokých code-bloků (ASCII diagramy) a tabulek; dlouhé tokeny (DNS/base64) se zalomí.
 - **Embedované volné fonty** (Source Sans 3 + Cascadia Mono + DejaVu záloha) → PDF vypadá všude stejně a je legálně přenositelné.
@@ -50,6 +51,32 @@ Engine umí **dva renderery** (přepínač `renderer` v configu):
 - **`chrome`** — sazba přes headless Chrome + GhostScript: **vektorový mermaid (SVG)**, downsample obrázků. Vyžaduje Node (puppeteer), Chrome/Edge a GhostScript; když Chrome chybí, spadne automaticky zpět na `mpdf`.
 
 Titulní strana je u obou **stejná** (full-bleed pozadí, bez hlavičky/patičky/čísla; běžící hlavička/patička + čísla stran jen v těle). Nastavení chrome rendereru (`chrome.image_dpi`, `chrome.margins`, cesty k `exe`/`gs`) viz [`md2pdf.config.sample.php`](md2pdf.config.sample.php).
+
+## Barevné téma
+
+Engine má **dvě vestavěné palety** (přepínač `theme` v configu, případně `--theme=` na CLI). Rozvržení a typografie jsou u obou identické — mění se jen barvy:
+
+| Téma | Vzhled | Kdy |
+|------|--------|-----|
+| `violet` (default) | fialový branding, výrazný akcent | prezentace, produktová a interní dokumentace |
+| `serious` | grafitově-černá se střízlivým vínovým akcentem: černá hlavička tabulky, šedé podklady, barva jen jako akcent | úřední/firemní dokumenty — upomínky, vyúčtování, smlouvy, reporty |
+
+```php
+'theme' => 'serious',
+```
+
+Jednotlivé barvy lze doladit klíčem `theme_colors` (přebíjí paletu token po tokenu; seznam tokenů viz `THEME_PALETTES` v `md2pdf.php`):
+
+```php
+'theme_colors' => ['accent' => '#8f1d1d', 'cover_bg' => '#0f172a'],
+```
+
+Když se má tentýž zdroj vysázet v obou variantách vedle sebe, přidej k výstupu příponu (`output_suffix` v configu nebo `--suffix=`):
+
+```bash
+php md2pdf.php                                  # README.pdf          (violet)
+php md2pdf.php --theme=serious --suffix=-serious # README-serious.pdf (serious)
+```
 
 ## Instalace
 
@@ -102,6 +129,9 @@ PDF vzniknou v `output_dir` (defaultně `{source_dir}/pdf`).
 php md2pdf.php                       # všechny soubory dle 'glob' z configu
 php md2pdf.php NazevDokumentu        # jen jeden (basename, .md volitelné)
 php md2pdf.php --config=jiny.php     # jiná konfigurace
+php md2pdf.php --renderer=chrome     # přebije 'renderer' z configu (mpdf|chrome)
+php md2pdf.php --theme=serious       # přebije 'theme' z configu (violet|serious)
+php md2pdf.php --suffix=-serious     # přípona názvu PDF (README-serious.pdf)
 php md2pdf.php --print-config        # vypíše JSON {source_dir,output_dir,glob}
 ```
 
@@ -130,6 +160,9 @@ Config je PHP soubor vracející pole. Plně okomentovaný vzor je [`md2pdf.conf
 | `combine` | sloučení více `.md` do jednoho PDF (viz [Combine](#combine)) |
 | `renderer` | `'mpdf'` (default) nebo `'chrome'` (vektorový mermaid) |
 | `chrome` | nastavení chrome rendereru (`exe`, `gs`, `image_dpi`, `margins`) |
+| `theme` | barevná paleta: `'violet'` (default) nebo `'serious'` (viz [Barevné téma](#barevné-téma)) |
+| `theme_colors` | doladění jednotlivých barev tématu (`['accent'=>'#…', …]`) |
+| `output_suffix` | přípona názvu výstupního PDF (`'-serious'` → `Dokument-serious.pdf`) |
 | `mermaid` | render mermaidu (viz níže) |
 
 ## Konvence Markdownu
@@ -148,6 +181,37 @@ Config je PHP soubor vracející pole. Plně okomentovaný vzor je [`md2pdf.conf
 - **Callouty:** každý blockquote se vykreslí jako box; obsahuje-li `⚠`/`POZOR`/… (dle `warn_keywords`), je oranžový.
 - **Obrázky:** `![popis](cesta.png)` — relativní cesty se berou vůči `source_dir`.
 - **Mermaid:** blok s jazykem `mermaid` → vyrenderovaný diagram (viz níže).
+- **Tvrdé zalomení řádku (podpisy, adresy):** viz níže.
+
+### Podpis, adresa a jiné bloky řádků pod sebou
+
+Řádky jednoho odstavce se standardně slévají do plynulého textu — to je správně pro
+prózu, ale rozbije to podpis nebo adresu. Tvrdé zalomení se zapíše podle CommonMark
+**dvěma mezerami** nebo **zpětným lomítkem** na konci řádku:
+
+```markdown
+S pozdravem
+
+**Jan Novák**\
+Firma s.r.o.\
+jan@firma.cz · +420 123 456 789
+```
+
+Obojí funguje stejně; `\` je vidět v editoru, dvě mezery ne — proto **doporučuji `\`**.
+Zalomení funguje v odstavcích i uvnitř blockquote (callouty, metablok).
+
+> ⚠ **`<br>` nefunguje** a vypíše se doslova. Engine veškeré HTML ve zdroji escapuje
+> záměrně, aby dokument nešlo rozbít vloženou značkou.
+
+Alternativou je napsat každý řádek jako **samostatný odstavec** (prázdný řádek mezi nimi).
+Funguje to taky, jen s větší mezerou mezi řádky — pro podpis je tvrdé zalomení hezčí.
+
+Pozor na dva vedlejší efekty:
+
+- Pokud řádek **omylem** končí dvěma mezerami, vznikne zalomení. Většina editorů umí
+  trailing whitespace ořezávat při uložení; vyplatí se to zapnout.
+- Řádek začínající **tučným labelem s dvojtečkou** (`**Sídlo:** …`) engine i bez zalomení
+  odsazuje do vlastního odstavce — u adresních bloků tedy zalomení psát nemusíš.
 
 ## Combine
 
@@ -240,11 +304,12 @@ Radek Hulán — [https://mywebdesign.cz/](https://mywebdesign.cz/)
 ## Features
 
 - **Two renderers** — `mpdf` (default, pure PHP, no deps) or `chrome` (vector mermaid via headless Chrome + GhostScript); switched in the config, visually unified output.
-- **Custom Markdown parser** (headings, lists incl. nested & checkboxes, GFM tables with alignment & cell wrapping, blockquotes/callouts, code, images, HR, **footnotes `[^1]`**, links incl. internal anchors and **autolinks `<url>`**, inline `**bold**`/`*italic*`/`~~strike~~`/`code` and **escaping `\*`**).
+- **Custom Markdown parser** (headings, lists incl. nested & checkboxes, GFM tables with alignment & cell wrapping, blockquotes/callouts, code, images, HR, **footnotes `[^1]`**, links incl. internal anchors and **autolinks `<url>`**, inline `**bold**`/`*italic*`/`~~strike~~`/`code`, **escaping `\*`** and **hard line breaks** via two trailing spaces or a trailing `\`).
 - **Cover page** with branding — title from `# H1`, subtitle/purpose and metadata (version, date, author) from the leading blockquote, logo at the bottom; **full-bleed** background, no header/footer.
 - **Table of contents** auto-generated from `##` headings (when there are at least 4).
 - **Header & footer** + page numbers in the body (cover unnumbered); all text comes from the config (localization).
 - **Callout boxes** from blockquotes; "warning" (orange) by keyword match.
+- **Two colour themes** — `violet` (bold, presentation-grade) or `serious` (graphite, restrained — for official/corporate documents); switched in the config, individual colours tunable.
 - **Mermaid diagrams** — the `chrome` renderer embeds crisp **vector SVG**, the `mpdf` renderer PNG via [mermaid-cli](https://github.com/mermaid-js/mermaid-cli).
 - **Auto-fit** of wide code blocks (ASCII diagrams) and tables; long tokens (DNS/base64) wrap.
 - **Embedded free fonts** (Source Sans 3 + Cascadia Mono + DejaVu fallback) → PDF looks the same everywhere and is legally redistributable.
@@ -271,6 +336,32 @@ The engine has **two renderers** (the `renderer` switch in the config):
 - **`chrome`** — typeset via headless Chrome + GhostScript: **vector mermaid (SVG)**, image downsampling. Requires Node (puppeteer), Chrome/Edge and GhostScript; if Chrome is missing it falls back to `mpdf`.
 
 The cover page is **identical** for both (full-bleed background, no header/footer/page-number; running header/footer + page numbers only in the body). Chrome renderer settings (`chrome.image_dpi`, `chrome.margins`, paths to `exe`/`gs`) — see [`md2pdf.config.sample.php`](md2pdf.config.sample.php).
+
+## Colour theme
+
+The engine ships **two palettes** (the `theme` switch in the config, or `--theme=` on the CLI). Layout and typography are identical for both — only colours change:
+
+| Theme | Look | Use for |
+|-------|------|---------|
+| `violet` (default) | violet branding, strong accent | presentations, product and internal documentation |
+| `serious` | graphite/black with a restrained maroon accent: black table header, grey surfaces, colour used only as an accent | official/corporate documents — reminders, statements, contracts, reports |
+
+```php
+'theme' => 'serious',
+```
+
+Individual colours can be tuned via `theme_colors` (overrides the palette token by token; token list in `THEME_PALETTES` in `md2pdf.php`):
+
+```php
+'theme_colors' => ['accent' => '#8f1d1d', 'cover_bg' => '#0f172a'],
+```
+
+To typeset the same source in both variants side by side, add an output suffix (`output_suffix` in the config or `--suffix=`):
+
+```bash
+php md2pdf.php                                   # README.pdf          (violet)
+php md2pdf.php --theme=serious --suffix=-serious # README-serious.pdf (serious)
+```
 
 ## Install
 
@@ -323,6 +414,9 @@ PDFs are written to `output_dir` (defaults to `{source_dir}/pdf`).
 php md2pdf.php                       # all files matching 'glob' from the config
 php md2pdf.php DocumentName          # only one (basename, .md optional)
 php md2pdf.php --config=other.php    # different configuration
+php md2pdf.php --renderer=chrome     # overrides 'renderer' from the config (mpdf|chrome)
+php md2pdf.php --theme=serious       # overrides 'theme' from the config (violet|serious)
+php md2pdf.php --suffix=-serious     # output filename suffix (README-serious.pdf)
 php md2pdf.php --print-config        # prints JSON {source_dir,output_dir,glob}
 ```
 
@@ -351,6 +445,9 @@ The config is a PHP file returning an array. A fully commented template is [`md2
 | `combine` | merge many `.md` into one PDF (see [Combine](#combine-1)) |
 | `renderer` | `'mpdf'` (default) or `'chrome'` (vector mermaid) |
 | `chrome` | chrome renderer settings (`exe`, `gs`, `image_dpi`, `margins`) |
+| `theme` | colour palette: `'violet'` (default) or `'serious'` (see [Colour theme](#colour-theme)) |
+| `theme_colors` | per-token tweaks of the active palette (`['accent'=>'#…', …]`) |
+| `output_suffix` | output filename suffix (`'-serious'` → `Document-serious.pdf`) |
 | `mermaid` | mermaid rendering (see below) |
 
 ## Markdown conventions
@@ -369,6 +466,29 @@ The config is a PHP file returning an array. A fully commented template is [`md2
 - **Callouts:** every blockquote renders as a box; if it contains a `warn_keywords` term it turns orange.
 - **Images:** `![alt](path.png)` — relative paths resolve against `source_dir`.
 - **Mermaid:** a `mermaid` block → a rendered diagram (see below).
+
+### Signatures, addresses and other stacked lines
+
+Lines of one paragraph are merged into flowing text — correct for prose, wrong for a
+signature block. Use a CommonMark hard break: **two trailing spaces** or a **trailing
+backslash**.
+
+```markdown
+Best regards,
+
+**John Doe**\
+Company Ltd.\
+john@company.com · +420 123 456 789
+```
+
+Both work; `\` is visible in the editor, trailing spaces are not — so **prefer `\`**.
+Hard breaks work in paragraphs and inside blockquotes (callouts, meta block).
+
+> ⚠ **`<br>` does not work** and is printed literally — the engine escapes all HTML in
+> the source on purpose, so a stray tag cannot break the document.
+
+You can also write each line as a **separate paragraph** (blank line between them); that
+works too, just with wider spacing.
 
 ## Combine
 

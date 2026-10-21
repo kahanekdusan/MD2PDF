@@ -21,6 +21,11 @@ return [
     'output_dir' => null,                      // null = {source_dir}/pdf
     'glob'       => '*.md',                     // výběr souborů, např. 'Projekt_*.md'
 
+    // Volitelná přípona názvu výstupního PDF (Dokument.md → Dokument-serious.pdf).
+    // Hodí se, když se tentýž zdroj sází ve dvou barevných variantách vedle sebe.
+    // Přebít lze i z příkazové řádky: --suffix=-serious
+    // 'output_suffix' => '',
+
     // Jak naložit s úvodním blockquote hned po H1:
     //   'meta' (default) = je to metablok (Verze/Datum/Autor/Účel) → vyřízne se
     //                      a hodnoty jdou na titulku
@@ -49,6 +54,30 @@ return [
     // Které úrovně nadpisů jdou do obsahu (TOC). Default [2, 3] (sekce + podsekce
     // jednoho dokumentu). V COMBINE režimu typicky [1, 2] (kapitoly + sekce).
     // 'toc_levels' => [2, 3],
+
+    // --- Normalizace textu (volitelné) -----------------------------------
+    // Doslovné náhrady aplikované při generování; platí pro mpdf i chrome.
+    // Zdrojové .md zůstávají nedotčené — převod dělá engine až při sazbě.
+    // Bez těchto klíčů se nic neděje (no-op).
+    //
+    //   'normalize_dashes' => true,   // dlouhé pomlčky (‒ – — ―) → spojovník '-'
+    //                                 // aplikuje se na tělo, TOC, titulku,
+    //                                 // hlavičku i popisky v mermaid diagramech
+    //
+    //   'text_replace' => [           // náhrady v TEXTU dokumentu (tělo, TOC,
+    //       '(c)' => '©',             // titulek, meta řádky); klíč = hledaný
+    //       '(tm)' => '™',            // řetězec, hodnota = čím se nahradí.
+    //   ],                            // Smí přebít i výchozí glyph substituce.
+    //
+    // POZOR: 'text_replace' se ZÁMĚRNĚ neaplikuje na zdroj mermaid diagramů —
+    // obecná náhrada nad syntaxí diagram rozbije (např. '->' => '→' rozseká
+    // šipku '-->' na '-→' a diagram se vůbec nevykreslí). Pokud opravdu
+    // potřebuješ nahrazovat i uvnitř diagramů, je na to samostatný klíč a je
+    // na tobě ohlídat, že náhrada nekoliduje se syntaxí mermaidu:
+    //   'text_replace_mermaid' => ['(c)' => '©'],
+    //
+    // Hodnota náhrady se do těla vkládá jako HTML (lze tedy vložit i značku,
+    // např. '<span class="g-ok">✓</span>'); znaky < > & si escapuj sám.
 
     // --- COMBINE: VÍCE .md → JEDEN PDF -----------------------------------
     // Volitelné. Když 'enabled' => true, engine NEgeneruje jeden PDF na soubor,
@@ -92,6 +121,29 @@ return [
     // Titulní strana je u OBOU stejná: full-bleed, bez hlavičky/patičky/čísla;
     // header/footer + čísla stran běží jen v těle.
     'renderer' => 'mpdf',
+
+    // --- Barevné téma -----------------------------------------------------
+    // 'violet' (DEFAULT) = fialový branding — výrazné, prezentační dokumenty.
+    // 'serious'          = grafitově-černá se střízlivým vínovým akcentem;
+    //                      černá hlavička tabulky, šedé podklady, barva jen
+    //                      jako akcent. Pro úřední/firemní dokumenty (upomínky,
+    //                      vyúčtování, smlouvy, reporty).
+    // Přebít lze i z příkazové řádky: --theme=serious
+    'theme' => 'violet',
+
+    // Volitelné doladění jednotlivých barev aktivního tématu. Přebíjí paletu
+    // token po tokenu; neuvedené tokeny zůstávají z tématu. Dostupné tokeny
+    // (viz THEME_PALETTES v md2pdf.php):
+    //   text, muted, muted2, border, primary, primary_dark, primary_mid,
+    //   accent, heading_rule, link, surface, surface_border, table_zebra,
+    //   callout_bg, callout_border, warn_bg, warn_border, warn_fg,
+    //   code_bg, code_fg, cover_bg, cover_rule, cover_eyebrow, cover_purpose,
+    //   cover_meta_label, cover_meta_value, cover_meta_border,
+    //   ok, no, amber, amber2, info, info2, gray
+    // 'theme_colors' => [
+    //     'accent'   => '#8f1d1d',
+    //     'cover_bg' => '#0f172a',
+    // ],
 
     // Nastavení chrome rendereru (uplatní se jen pro 'renderer' => 'chrome').
     'chrome' => [

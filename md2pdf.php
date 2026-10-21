@@ -22,6 +22,8 @@
  *   php tools/md2pdf.php Nazev            # převede jen jeden (basename, .md volitelné)
  *   php tools/md2pdf.php --config=jiny.php   # použij jinou konfiguraci
  *   php tools/md2pdf.php --renderer=chrome   # přebij renderer z configu (mpdf|chrome)
+ *   php tools/md2pdf.php --theme=serious     # přebij barevné téma (violet|serious)
+ *   php tools/md2pdf.php --suffix=-serious   # přípona názvu PDF (README-serious.pdf)
  *   php tools/md2pdf.php --print-config   # vypiš JSON {source_dir,output_dir,glob}
  *
  * Konstanty/texty specifické pro projekt (cesty, glob, identita, překlad,
@@ -44,12 +46,18 @@ $argsIn           = array_slice($argv, 1);
 $configPath       = null;
 $printConfig      = false;
 $rendererOverride = null;
+$themeOverride    = null;
+$suffixOverride   = null;
 $positional       = [];
 foreach ($argsIn as $a) {
     if (preg_match('/^--config=(.+)$/', $a, $m)) {
         $configPath = $m[1];
     } elseif (preg_match('/^--renderer=(.+)$/', $a, $m)) {
         $rendererOverride = strtolower(trim($m[1]));
+    } elseif (preg_match('/^--theme=(.+)$/', $a, $m)) {
+        $themeOverride = strtolower(trim($m[1]));
+    } elseif (preg_match('/^--suffix=(.*)$/', $a, $m)) {
+        $suffixOverride = trim($m[1]);
     } elseif ($a === '--print-config') {
         $printConfig = true;
     } else {
@@ -80,6 +88,11 @@ if ($rendererOverride !== null) {
     $CFG['renderer'] = $rendererOverride;
 }
 
+// --theme= a --suffix= z příkazové řádky přebíjejí config (užitečné, když se
+// tentýž dokument sází ve dvou variantách vedle sebe).
+if ($themeOverride !== null)  { $CFG['theme'] = $themeOverride; }
+if ($suffixOverride !== null) { $CFG['output_suffix'] = $suffixOverride; }
+
 // ---- Odvozené globální hodnoty -------------------------------------------
 $SRC_DIR = realpath($CFG['source_dir'] ?? '');
 if ($SRC_DIR === false) {
@@ -87,6 +100,9 @@ if ($SRC_DIR === false) {
     exit(1);
 }
 $OUT_DIR = $CFG['output_dir'] ?: ($SRC_DIR . DIRECTORY_SEPARATOR . 'pdf');
+// Přípona k názvu výstupního PDF (např. '-serious' → README-serious.pdf).
+// Umožní vysázet tentýž zdroj ve dvou variantách vedle sebe bez přepsání.
+$OUT_SUFFIX = preg_replace('/[^A-Za-z0-9._-]/', '', (string) ($CFG['output_suffix'] ?? ''));
 $GLOB    = $CFG['glob']    ?? '*.md';
 $AUTHOR  = $CFG['author']  ?? '';
 $COMPANY = $CFG['company'] ?? '';
@@ -103,6 +119,128 @@ if ($printConfig) {
 }
 
 @mkdir($OUT_DIR, 0775, true);
+
+// =====================================================================
+//  BAREVNÉ TÉMA (paleta)
+//  Engine má dvě vestavěné varianty; vybírá se v configu klíčem 'theme'
+//  (nebo přepínačem --theme=NAZEV):
+//    'violet' (DEFAULT) — fialový branding, výrazný, prezentační
+//    'serious'          — grafitově-černá s tlumeným vínovým akcentem;
+//                         střízlivá „úřední/firemní" sazba (černá hlavička
+//                         tabulky, šedé podklady, barva jen jako akcent)
+//  Jednotlivé tokeny lze v configu přebít klíčem 'theme_colors' => [...].
+// =====================================================================
+
+// Interní značka tvrdého zalomení řádku uvnitř odstavce (CommonMark hard
+// break: dvě mezery nebo `\` na konci řádku). Do textu se vkládá JEŠTĚ PŘED
+// mdInline(), protože ta HTML escapuje — hotové `<br>` by se vypsalo doslova.
+// Řídicí znak \x02 se v MD zdroji nevyskytuje, projde htmlspecialchars beze
+// změny a žádný inline vzor (bold/kurzíva/kód/odkaz) ho nechytí.
+const MD_HARD_BREAK = "\x02HB\x02";
+const MD_HARD_BREAK_RE = '/ {2,}$|(?<!\\\\)\\\\$/';
+
+const THEME_PALETTES = [
+
+    // ---- fialová (původní branding) -----------------------------------
+    'violet' => [
+        'text'              => '#1f2937',  // základní text
+        'muted'             => '#6b7280',  // popisky, patička, del
+        'muted2'            => '#4b5563',  // poznámky pod čarou, TOC úroveň 2
+        'border'            => '#d1d5db',  // linky, rámečky buněk
+        'primary'           => '#4c1d95',  // nadpisy, strong, hlavička tabulky
+        'primary_dark'      => '#5b21b6',  // H3, inline code, .lbl
+        'primary_mid'       => '#6d28d9',  // H4–H6
+        'accent'            => '#6c5ce7',  // akcent (čísla TOC, odkazy, fnref)
+        'heading_rule'      => '#6c5ce7',  // linka pod H1 / titulkem obsahu
+        'link'              => '#6c5ce7',
+        'surface'           => '#f3f0ff',  // podklad inline kódu a calloutu
+        'surface_border'    => '#e0d7fa',
+        'table_zebra'       => '#faf8ff',  // sudé řádky tabulky
+        'callout_bg'        => '#f3f0ff',
+        'callout_border'    => '#6c5ce7',
+        'warn_bg'           => '#fdf3ec',
+        'warn_border'       => '#d97706',
+        'warn_fg'           => '#b45309',
+        'code_bg'           => '#1e1e2e',  // fenced code block
+        'code_fg'           => '#cdd6f4',
+        'cover_bg'          => '#4c1d95',  // titulka: plocha přes celou stranu
+        'cover_rule'        => '#ede9fe',  // horní linka na titulce
+        'cover_eyebrow'     => '#c4b5fd',
+        'cover_purpose'     => '#e9d5ff',
+        'cover_meta_label'  => '#c4b5fd',
+        'cover_meta_value'  => '#ffffff',
+        'cover_meta_border' => '#8b6fd0',
+        'ok'                => '#16a34a',  // sémantické glyfy ✓ ✗ ● …
+        'no'                => '#dc2626',
+        'amber'             => '#d97706',
+        'amber2'            => '#e08e0b',
+        'info'              => '#2563eb',
+        'info2'             => '#2f7fc9',
+        'gray'              => '#9ca3af',
+    ],
+
+    // ---- serious: grafit + vínový akcent (střízlivá varianta) ----------
+    'serious' => [
+        'text'              => '#16181d',
+        'muted'             => '#5f646c',
+        'muted2'            => '#40454d',
+        'border'            => '#c8ccd2',
+        'primary'           => '#14161a',
+        'primary_dark'      => '#23262c',
+        'primary_mid'       => '#3a3f47',
+        'accent'            => '#8f1d1d',
+        'heading_rule'      => '#14161a',
+        'link'              => '#8f1d1d',
+        'surface'           => '#f2f3f5',
+        'surface_border'    => '#dde0e4',
+        'table_zebra'       => '#f6f7f8',
+        'callout_bg'        => '#f2f3f5',
+        'callout_border'    => '#14161a',
+        'warn_bg'           => '#fdf2f2',
+        'warn_border'       => '#8f1d1d',
+        'warn_fg'           => '#8f1d1d',
+        'code_bg'           => '#1c1e22',
+        'code_fg'           => '#e3e6ea',
+        // Titulka je světlejší grafit než text/tabulky — plná čerň působila
+        // na celé straně těžce a vínová linka i bílé logo na ní zanikaly.
+        'cover_bg'          => '#343b45',
+        'cover_rule'        => '#8f1d1d',
+        'cover_eyebrow'     => '#aeb6c0',
+        'cover_purpose'     => '#dfe3e8',
+        'cover_meta_label'  => '#aeb6c0',
+        'cover_meta_value'  => '#ffffff',
+        'cover_meta_border' => '#6d7580',
+        'ok'                => '#1a7f37',
+        'no'                => '#b3261e',
+        'amber'             => '#a15c00',
+        'amber2'            => '#a15c00',
+        'info'              => '#1b4f8a',
+        'info2'             => '#1b4f8a',
+        'gray'              => '#9aa1ab',
+    ],
+];
+
+// Rozřeš paletu: 'theme' z configu (default 'violet'), pak volitelné přebití
+// jednotlivých tokenů přes 'theme_colors'. Neznámé jméno = tvrdá chyba (překlep
+// v configu by jinak tiše vrátil default paletu).
+$themeName = strtolower(trim((string) ($CFG['theme'] ?? 'violet')));
+if ($themeName === '') { $themeName = 'violet'; }
+if (!isset(THEME_PALETTES[$themeName])) {
+    fwrite(STDERR, "Neznámé téma: '{$themeName}' (dostupná: " . implode(', ', array_keys(THEME_PALETTES)) . ")\n");
+    exit(1);
+}
+$T = THEME_PALETTES[$themeName];
+foreach ((array) ($CFG['theme_colors'] ?? []) as $k => $v) {
+    if (isset($T[$k]) && is_string($v) && $v !== '') { $T[$k] = $v; }
+}
+$THEME_NAME = $themeName;
+
+/** Barva z aktivní palety (pro použití mimo funkce s `global $T`). */
+function tc(string $key): string
+{
+    global $T;
+    return $T[$key] ?? '#000000';
+}
 
 // =====================================================================
 //  Inline markdown (bold, italic, code, links) → HTML
@@ -276,10 +414,13 @@ function mdToHtml(string $md): array
     $paragraph   = [];
     $listStack   = [];           // [['indent'=>int,'type'=>'ul'|'ol'], ...]
     $pendingLi   = false;
+    $liRaw       = null;         // buffer surového MD textu otevřené <li> (inline render až při flush)
+    $liPre       = '';           // prefix HTML uvnitř <li> (např. checkbox span)
     $bqLines     = [];           // surové řádky uvnitř blockquote (callout)
     $inBq        = false;
     $tableRows   = [];
     $tableAligns = [];
+    $tableCols   = [];           // volitelné šířky sloupců z direktivy <!-- cols: 5 40 10 ... -->
     $inTable     = false;
     $inCode      = false;
     $codeFenceLen = 0;        // délka otevíracího plotu (``` vs ````) — CommonMark nesting
@@ -300,18 +441,37 @@ function mdToHtml(string $md): array
     $flushPara = function () use (&$paragraph, &$html) {
         if (!$paragraph) { return; }
         $text = implode(' ', $paragraph);
+        // Tvrdé zalomení: značka byla přilepena na konec řádku, spojovací mezera
+        // za ní je navíc → pryč, ať <br> nezačíná mezerou. Značka na úplném konci
+        // odstavce nedává smysl (za ní už nic není) → zahodit.
+        $text = str_replace(MD_HARD_BREAK . ' ', MD_HARD_BREAK, $text);
+        while (substr($text, -strlen(MD_HARD_BREAK)) === MD_HARD_BREAK) {
+            $text = substr($text, 0, -strlen(MD_HARD_BREAK));
+        }
         // Popisek obrázku: samostatný kurzívový řádek hned za <figure> → vycentrovat.
         $afterFig = (substr(rtrim($html), -11) === '<!--/fig-->');
         $t = trim($text);
         $isCaption = $afterFig && count($paragraph) === 1
             && (preg_match('/^\*[^*]+\*$/u', $t) || preg_match('/^_[^_]+_$/u', $t));
-        $html .= ($isCaption ? '<p class="fig-cap">' : '<p>') . mdInline($text) . "</p>\n";
+        $inline = str_replace(MD_HARD_BREAK, '<br>', mdInline($text));
+        $html .= ($isCaption ? '<p class="fig-cap">' : '<p>') . $inline . "</p>\n";
         $paragraph = [];
     };
 
-    $emitLi = function (int $indent, string $type, string $text) use (&$listStack, &$html, &$pendingLi) {
+    // Inline render obsahu <li> se odkládá až sem (přes $liRaw), aby tučný/kurzíva
+    // text mohl přesahovat přes zalomený (soft-wrap) řádek list-itemu. Volá se
+    // VŽDY před zápisem </li> a před otevřením vnořeného seznamu uvnitř <li>.
+    $flushLiContent = function () use (&$html, &$liRaw, &$liPre) {
+        if ($liRaw !== null) {
+            $html .= $liPre . mdInline($liRaw);
+            $liRaw = null;
+            $liPre = '';
+        }
+    };
+
+    $emitLi = function (int $indent, string $type, string $text) use (&$listStack, &$html, &$pendingLi, &$liRaw, &$liPre, $flushLiContent) {
         while ($listStack && end($listStack)['indent'] > $indent) {
-            if ($pendingLi) { $html .= "</li>\n"; $pendingLi = false; }
+            if ($pendingLi) { $flushLiContent(); $html .= "</li>\n"; $pendingLi = false; }
             $top = array_pop($listStack);
             $html .= "</{$top['type']}>\n";
             if ($listStack) { $pendingLi = true; }
@@ -319,30 +479,36 @@ function mdToHtml(string $md): array
         $top = $listStack ? end($listStack) : null;
         if ($top && $top['indent'] === $indent) {
             if ($top['type'] !== $type) {
-                if ($pendingLi) { $html .= "</li>\n"; }
+                if ($pendingLi) { $flushLiContent(); $html .= "</li>\n"; }
                 array_pop($listStack);
                 $html .= "</{$top['type']}>\n<{$type}>\n";
                 $listStack[] = ['indent' => $indent, 'type' => $type];
             } else {
-                if ($pendingLi) { $html .= "</li>\n"; }
+                if ($pendingLi) { $flushLiContent(); $html .= "</li>\n"; }
             }
         } else {
+            // otevírá se nový/hlubší seznam — nejdřív dorenderuj text rodičovské <li>
+            $flushLiContent();
             $html .= "<{$type}>\n";
             $listStack[] = ['indent' => $indent, 'type' => $type];
         }
-        // checkbox list:  - [ ] / - [x]
+        // checkbox list:  - [ ] / - [x]  — obsah se bufferuje, render až při flush
         if (preg_match('/^\[([ xX])\]\s+(.*)$/', $text, $cm)) {
             $box = (strtolower($cm[1]) === 'x') ? '&#9745;' : '&#9744;'; // ☑ / ☐
-            $html .= '  <li class="task"><span class="cb">' . $box . '</span> ' . mdInline($cm[2]);
+            $html .= '  <li class="task"><span class="cb">' . $box . '</span> ';
+            $liPre = '';
+            $liRaw = $cm[2];
         } else {
-            $html .= '  <li>' . mdInline($text);
+            $html .= '  <li>';
+            $liPre = '';
+            $liRaw = $text;
         }
         $pendingLi = true;
     };
 
-    $flushList = function () use (&$listStack, &$html, &$pendingLi) {
+    $flushList = function () use (&$listStack, &$html, &$pendingLi, $flushLiContent) {
         while ($listStack) {
-            if ($pendingLi) { $html .= "</li>\n"; $pendingLi = false; }
+            if ($pendingLi) { $flushLiContent(); $html .= "</li>\n"; $pendingLi = false; }
             $top = array_pop($listStack);
             $html .= "</{$top['type']}>\n";
             $pendingLi = $listStack ? true : false;
@@ -365,15 +531,31 @@ function mdToHtml(string $md): array
         $bqLines = [];
     };
 
-    $flushTable = function () use (&$inTable, &$tableRows, &$tableAligns, &$html) {
+    $flushTable = function () use (&$inTable, &$tableRows, &$tableAligns, &$tableCols, &$html) {
         if (!$inTable || count($tableRows) < 1) {
+            // pozor: $tableCols se NEmaže — direktiva <!-- cols: … --> smí stát
+            // před tabulkou oddělená prázdným řádkem (ten sem taky doběhne)
             $inTable = false; $tableRows = []; $tableAligns = [];
             return;
         }
         $header = $tableRows[0];
         $body   = array_slice($tableRows, 1);
         $cols   = count($header);
-        $html  .= "<table class=\"md-tab\">\n<thead><tr>";
+        $html  .= "<table class=\"md-tab\">\n";
+        // Volitelné šířky sloupců (relativní váhy) — table-layout:fixed je jinak dělí rovnoměrně
+        if ($tableCols) {
+            $w = array_slice(array_map('floatval', $tableCols), 0, $cols);
+            while (count($w) < $cols) { $w[] = 1.0; }
+            $sum = array_sum($w);
+            if ($sum > 0) {
+                $html .= "<colgroup>";
+                foreach ($w as $ww) {
+                    $html .= '<col style="width:' . round($ww / $sum * 100, 3) . '%" />';
+                }
+                $html .= "</colgroup>\n";
+            }
+        }
+        $html  .= "<thead><tr>";
         foreach ($header as $i => $cell) {
             $a = $tableAligns[$i] ?? 'left';
             $html .= '<th style="text-align:' . $a . '">' . mdInline(trim($cell)) . '</th>';
@@ -389,11 +571,12 @@ function mdToHtml(string $md): array
             $html .= "</tr>\n";
         }
         $html .= "</tbody></table>\n";
-        $inTable = false; $tableRows = []; $tableAligns = [];
+        $inTable = false; $tableRows = []; $tableAligns = []; $tableCols = [];
     };
 
     // ---- hlavní smyčka -------------------------------------------------
-    foreach ($lines as $line) {
+    for ($lineIdx = 0, $lineCnt = count($lines); $lineIdx < $lineCnt; $lineIdx++) {
+        $line = $lines[$lineIdx];
         // Fenced code block — s podporou VNOŘENÝCH plotů dle CommonMark:
         // ````vnejsi blok smí obsahovat ``` vnitřní; zavírá jen plot s >= délkou
         // otevíracího a bez dalšího obsahu na řádku.
@@ -507,8 +690,21 @@ function mdToHtml(string $md): array
             continue;
         }
 
-        // GFM tabulka
-        if (strpos($trim, '|') !== false && substr_count($trim, '|') >= 1) {
+        // Direktiva šířek sloupců pro NÁSLEDUJÍCÍ tabulku: <!-- cols: 5 40 10 10 10 15 -->
+        // Hodnoty jsou relativní váhy (nemusí dávat 100), oddělené mezerou/čárkou.
+        if (preg_match('~^<!--\s*cols\s*:\s*([0-9.,\s]+?)\s*-->$~', $trim, $mCols)) {
+            $flushPara(); $flushList();
+            if ($inTable) { $flushTable(); }
+            $tableCols = preg_split('/[\s,]+/', trim($mCols[1]), -1, PREG_SPLIT_NO_EMPTY);
+            continue;
+        }
+
+        // GFM tabulka — rozpoznej jen REÁLNOU tabulku, ne řádek, který '|' jen
+        // obsahuje uvnitř textu (např. "read|read_write" v odrážce). Pravidla:
+        //  • oddělovací řádek (---) když už máme header → nastav zarovnání,
+        //  • tělo už otevřené tabulky → další řádek,
+        //  • header řádek → JEN když HNED následuje oddělovací řádek (GFM).
+        if (strpos($trim, '|') !== false) {
             $stripped = preg_replace('/^\||\|$/', '', $trim);
             $cells    = array_map('trim', explode('|', $stripped));
             $isSep    = (count($cells) > 0) && !array_filter($cells, function ($c) {
@@ -524,13 +720,25 @@ function mdToHtml(string $md): array
                 $inTable = true;
                 continue;
             }
-            $flushPara(); $flushList();
-            $tableRows[] = $cells;
-            $inTable = true;
-            continue;
-        } else {
-            if ($inTable) { $flushTable(); }
+            $isTableRow = $inTable;
+            if (!$isTableRow) {   // header je tabulka jen když další řádek je oddělovač
+                $nextTrim = ($lineIdx + 1 < $lineCnt) ? trim($lines[$lineIdx + 1]) : '';
+                if ($nextTrim !== '' && strpos($nextTrim, '|') !== false) {
+                    $nc = array_map('trim', explode('|', preg_replace('/^\||\|$/', '', $nextTrim)));
+                    $isTableRow = ($nc && !array_filter($nc, function ($c) {
+                        return !preg_match('/^:?-{2,}:?$/', $c);
+                    }));
+                }
+            }
+            if ($isTableRow) {
+                $flushPara(); $flushList();
+                $tableRows[] = $cells;
+                $inTable = true;
+                continue;
+            }
+            // jinak: '|' je jen text → propadne na běžné zpracování (list/odstavec)
         }
+        if ($inTable) { $flushTable(); }
 
         // Unordered / nested list
         if (preg_match('/^(\s*)[-*+]\s+(.*)$/', $line, $m)) {
@@ -546,9 +754,15 @@ function mdToHtml(string $md): array
             continue;
         }
 
-        // Pokračování list-item (indentovaný text bez bulletu)
+        // Pokračování list-item (indentovaný text bez bulletu) — připoj k bufferu
+        // surového textu <li>, aby inline formátování (tučné/kurzíva/odkaz) mohlo
+        // přesahovat přes zalomený řádek. Fallback na přímý render, kdyby buffer chyběl.
         if ($listStack && $pendingLi && preg_match('/^\s{2,}(\S.*)$/', $line, $m)) {
-            $html .= ' ' . mdInline(trim($m[1]));
+            if ($liRaw !== null) {
+                $liRaw .= ' ' . trim($m[1]);
+            } else {
+                $html .= ' ' . mdInline(trim($m[1]));
+            }
             continue;
         }
 
@@ -564,7 +778,14 @@ function mdToHtml(string $md): array
         if ($paragraph && preg_match('/^\*\*[^*]+(?::\*\*|\*\*\s+—)/u', $trim)) {
             $flushPara();
         }
-        $paragraph[] = $trim;
+        // Tvrdé zalomení uvnitř odstavce (CommonMark): dvě a více mezer NEBO `\`
+        // na konci řádku. Typický případ jsou podpisy a adresní bloky, kde by
+        // spojení do jednoho odstavce bylo špatně. Značku řeší $flushPara().
+        if (preg_match(MD_HARD_BREAK_RE, rtrim($line, "\r\n"))) {
+            $paragraph[] = rtrim($trim, '\\') . MD_HARD_BREAK;
+        } else {
+            $paragraph[] = $trim;
+        }
     }
 
     $flushPara(); $flushList(); $flushBq(); $flushTable();
@@ -577,12 +798,93 @@ function mdToHtml(string $md): array
 //  Ponecháno (font je má): → ← ↔ ★ ✓ ✗ ✚ ⚠ ≈ − ≥ ≤ ∩ a box-drawing.
 //  Nahrazeno (font NEmá – SMP/emoji plane): ✅ ❌ 🔶 🔷 ⭐ ️(VS16)
 // =====================================================================
+// Konfigurovatelné DOSLOVNÉ náhrady textu z configu. Bez klíčů vrací vstup beze
+// změny → no-op, plně zpětně kompatibilní.
+//   'normalize_dashes' => true    dlouhé pomlčky (‒ – — ―) → spojovník '-'
+//   'text_replace' => ['z'=>'na'] náhrady v TEXTU dokumentu (tělo, TOC, titul);
+//                                 klíč = hledaný řetězec, hodnota = náhrada.
+//   'text_replace_mermaid'        náhrady ve ZDROJI mermaid diagramů — vědomě
+//                                 oddělené, protože obecná náhrada nad syntaxí
+//                                 diagram rozbije (např. '->' rozseká '-->').
+//
+// Vstupní body (podle domény, ne jeden univerzální):
+//   configTextReplaceHtml()    — vygenerované HTML (tělo/TOC): matchuje i
+//                                HTML-escapovanou podobu klíče ('->' i '-&gt;').
+//   configTextReplaceText()    — holý text (titul, hlavička, PDF metadata).
+//   configTextReplaceMermaid() — zdroj diagramu: JEN normalize_dashes
+//                                (+ volitelný 'text_replace_mermaid').
+const CFG_DASH_MAP = [
+    "\u{2012}" => '-',   // FIGURE DASH (‒)
+    "\u{2013}" => '-',   // EN DASH (–)
+    "\u{2014}" => '-',   // EM DASH (—)
+    "\u{2015}" => '-',   // HORIZONTAL BAR (―)
+];
+
+// Náhrady z configu → normalizovaná mapa pro strtr. Numerické klíče PHP
+// přetypuje na int, proto (string) — jinak by 'text_replace' => ['2024'=>…]
+// tiše nefungovalo.
+function configReplaceMap(string $key): array
+{
+    global $CFG;
+    $map = [];
+    foreach (($CFG[$key] ?? []) as $from => $to) {
+        $from = (string) $from;
+        if ($from !== '' && is_scalar($to)) {
+            $map[$from] = (string) $to;
+        }
+    }
+    return $map;
+}
+
+function configTextReplaceText(string $s): string
+{
+    global $CFG;
+    $map = empty($CFG['normalize_dashes']) ? [] : CFG_DASH_MAP;
+    $map = configReplaceMap('text_replace') + $map;
+    return $map ? strtr($s, $map) : $s;
+}
+
+function configTextReplaceHtml(string $html): string
+{
+    global $CFG;
+    $map = empty($CFG['normalize_dashes']) ? [] : CFG_DASH_MAP;
+    $map = configReplaceMap('text_replace') + $map;
+    // Tělo prošlo htmlspecialchars(), takže '->' je v HTML '-&gt;'. Zaregistruj
+    // i escapovanou podobu klíče, jinak by náhrada v textu tiše nikdy nesedla.
+    foreach ($map as $from => $to) {
+        $from = (string) $from;   // numerický klíč pole je int, viz configReplaceMap()
+        $esc  = htmlspecialchars($from, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if ($esc !== $from && !isset($map[$esc])) { $map[$esc] = $to; }
+    }
+    return $map ? strtr($html, $map) : $html;
+}
+
+function configTextReplaceMermaid(string $src): string
+{
+    global $CFG;
+    $map = empty($CFG['normalize_dashes']) ? [] : CFG_DASH_MAP;
+    $map = configReplaceMap('text_replace_mermaid') + $map;
+    return $map ? strtr($src, $map) : $src;
+}
+
 function applyGlyphSubstitutions(string $html): string
 {
     global $CFG;
+    // Náhrady z configu JAKO PRVNÍ — aby klíč mohl sedět i na syrový emoji znak
+    // a config tak směl přebít výchozí glyph substituce; vložená hodnota pak
+    // projde stejnou font-safety pipeline (mapa níže + pojistka na konci).
+    $html = configTextReplaceHtml($html);
     $tip  = htmlspecialchars($CFG['strings']['label_tip']  ?? 'TIP:',  ENT_QUOTES, 'UTF-8');
     $note = htmlspecialchars($CFG['strings']['label_note'] ?? 'POZN:', ENT_QUOTES, 'UTF-8');
     $map = [
+        // Spojovníky/mezery, které primární font (Montserrat) nemá → v mPDF se
+        // vykreslí jako prázdný box (tofu) a navíc rozbijí justifikaci řádku
+        // (zdvojený/přeházený text). Vizuálně bezpečné náhrady; platí pro oba
+        // renderery, takže výstup chrome i mPDF je konzistentní.
+        "\u{2011}" => '-',          // NON-BREAKING HYPHEN (‑) → hyphen-minus
+        "\u{2010}" => '-',          // HYPHEN (‐) → hyphen-minus
+        "\u{00AD}" => '',            // SOFT HYPHEN — odstranit
+        "\u{202F}" => "\u{00A0}",   // NARROW NO-BREAK SPACE → NBSP
         "\u{2705}" => '<span class="g-ok">&#10003;</span>',   // ✅ → ✓ (zeleně)
         "\u{274C}" => '<span class="g-no">&#10007;</span>',   // ❌ → ✗ (červeně)
         "\u{2B50}" => '&#9733;',                              // ⭐ → ★
@@ -653,20 +955,20 @@ function parseMeta(string $md): array
     }
     $head = implode("\n", $bq);
 
-    if (preg_match('/\*\*' . $lVer . ':\*\*\s*([^·\n]+?)(?:\s*·|\n|$)/u', $head, $m)) {
+    if (preg_match('/(?:\*\*)?' . $lVer . ':(?:\*\*)?\s*([^·\n]+?)(?:\s*·|\n|$)/u', $head, $m)) {
         $meta['version'] = trim($m[1]);
     }
-    if (preg_match('/\*\*' . $lDat . ':\*\*\s*([^·\n]+?)(?:\s*·|\n|$)/u', $head, $m)) {
+    if (preg_match('/(?:\*\*)?' . $lDat . ':(?:\*\*)?\s*([^·\n]+?)(?:\s*·|\n|$)/u', $head, $m)) {
         $meta['date'] = trim($m[1]);
     }
-    if (preg_match('/\*\*' . $lAut . ':\*\*\s*([^·\n]+?)(?:\s*·|\n|$)/u', $head, $m)) {
+    if (preg_match('/(?:\*\*)?' . $lAut . ':(?:\*\*)?\s*([^·\n]+?)(?:\s*·|\n|$)/u', $head, $m)) {
         $meta['docAuthor'] = trim($m[1]);
     }
     // Účel: vícerádkový — sbírej pokračovací řádky, dokud věta nekončí
     // tečkou/!/? nebo nenarazíme na další **Label:** řádek (max 4 řádky).
     $bqN = count($bq);
     for ($k = 0; $k < $bqN; $k++) {
-        if (preg_match('/\*\*' . $lUce . ':\*\*\s*(.*)$/u', $bq[$k], $m)) {
+        if (preg_match('/^(?:\*\*)?' . $lUce . ':(?:\*\*)?\s*(.*)$/u', $bq[$k], $m)) {
             $parts = [trim($m[1])];
             for ($j = $k + 1; $j < $bqN && count($parts) < 4; $j++) {
                 $nl = trim($bq[$j]);
@@ -728,120 +1030,120 @@ function splitTitle(string $md): array
 }
 
 // =====================================================================
-//  CSS — fialový (purple) branding
-//  Paleta: #4c1d95 primární · #5b21b6/#6d28d9 odstíny · #6c5ce7 akcent ·
-//          #c4b5fd/#e9d5ff světlé · #f3f0ff podklady
+//  CSS — barvy jdou z aktivní palety ($T, viz THEME_PALETTES nahoře).
+//  Rozvržení/typografie je pro všechna témata SPOLEČNÁ; téma mění jen barvy.
 // =====================================================================
 function buildCss(float $tableFontPt, float $codeFontPt): string
 {
+    global $T;
     $tf = number_format($tableFontPt, 1);
     $cf = number_format($codeFontPt, 1);
     return <<<CSS
 body {
   font-family: "montserrat", "dejavusans", sans-serif;
   font-size: 10.9pt;
-  color: #1f2937;
+  color: {$T['text']};
   line-height: 1.55;
 }
 
-/* ---------- Titulní strana (fialový blok přes celou stranu) ---------- */
+/* ---------- Titulní strana (barevný blok přes celou stranu) ---------- */
 .cover { page-break-after: always; }
 .cover-band {
-  background: #4c1d95;
+  background: {$T['cover_bg']};
   color: #ffffff;
   padding: 18mm 16mm 14mm 16mm;
   height: 250mm;
 }
-.cover-rule { border-top: 4px solid #ede9fe; margin-bottom: 12mm; width: 100%; }
+.cover-rule { border-top: 4px solid {$T['cover_rule']}; margin-bottom: 12mm; width: 100%; }
 .cover-logo { margin-bottom: 12mm; }
 .logo-mark {
-  display: inline-block; background: #ffffff; color: #4c1d95;
+  display: inline-block; background: #ffffff; color: {$T['cover_bg']};
   font-weight: 700; font-size: 22pt; line-height: 1;
   padding: 4mm 4.6mm; border-radius: 3mm;
 }
 .cover-eyebrow {
   font-size: 10pt; letter-spacing: 4px; text-transform: uppercase;
-  color: #c4b5fd; margin-bottom: 7mm;
+  color: {$T['cover_eyebrow']}; margin-bottom: 7mm;
 }
 .cover-title {
   font-size: 29pt; font-weight: 700; line-height: 1.14;
   color: #ffffff; margin: 0 0 9mm 0; padding: 0; border: none;
 }
-.cover-purpose { font-size: 12pt; color: #e9d5ff; line-height: 1.5; margin-bottom: 16mm; }
-/* bold/code na fialovém podkladu musí být bílé (globální strong je fialový) */
+.cover-purpose { font-size: 12pt; color: {$T['cover_purpose']}; line-height: 1.5; margin-bottom: 16mm; }
+/* bold/code na barevném podkladu musí být bílé (globální strong má barvu tématu) */
 .cover-band strong { color: #ffffff; }
 .cover-band code { background: transparent; border: none; color: #ffffff; padding: 0; }
-.cover-meta { font-size: 9.5pt; color: #e9d5ff; width: 100%; border-collapse: collapse; }
-.cover-meta td { padding: 6pt 0; border-top: 0.5pt solid #8b6fd0; vertical-align: middle; }
-.cover-meta tr.last td { border-bottom: 0.5pt solid #8b6fd0; }
+.cover-meta { font-size: 9.5pt; color: {$T['cover_purpose']}; width: 100%; border-collapse: collapse; }
+.cover-meta td { padding: 6pt 0; border-top: 0.5pt solid {$T['cover_meta_border']}; vertical-align: middle; }
+.cover-meta tr.last td { border-bottom: 0.5pt solid {$T['cover_meta_border']}; }
 .cover-meta-label {
-  width: 44mm; color: #c4b5fd; letter-spacing: 2px; text-transform: uppercase;
+  width: 44mm; color: {$T['cover_meta_label']}; letter-spacing: 2px; text-transform: uppercase;
   font-size: 8.2pt; font-weight: 700;
 }
-.cover-meta-value { padding-left: 6mm; color: #ffffff; }
+.cover-meta-value { padding-left: 6mm; color: {$T['cover_meta_value']}; }
 
 /* ---------- Obsah (TOC) ---------- */
 .toc { page-break-after: always; }
 .toc-title {
-  color: #4c1d95; font-size: 21pt; font-weight: 700;
-  margin: 6mm 0 7mm 0; padding-bottom: 3mm; border-bottom: 2px solid #6c5ce7;
+  color: {$T['primary']}; font-size: 21pt; font-weight: 700;
+  margin: 6mm 0 7mm 0; padding-bottom: 3mm; border-bottom: 2px solid {$T['heading_rule']};
 }
 .toc-h2 { margin: 2.6mm 0; font-size: 11pt; }
-.toc-h2 a { color: #1f2937; text-decoration: none; }
-.toc-num { color: #6c5ce7; font-weight: 700; }
+.toc-h2 a { color: {$T['text']}; text-decoration: none; }
+.toc-num { color: {$T['accent']}; font-weight: 700; }
 
 /* ---------- Nadpisy ---------- */
 h1, h2, h3, h4, h5, h6 {
-  color: #4c1d95; font-weight: 700; line-height: 1.25; page-break-after: avoid;
+  color: {$T['primary']}; font-weight: 700; line-height: 1.25; page-break-after: avoid;
 }
 h1 {
   font-size: 20pt; margin: 7mm 0 4.5mm 0; padding-bottom: 2.5mm;
-  border-bottom: 2px solid #6c5ce7;
+  border-bottom: 2px solid {$T['heading_rule']};
 }
 h1.pb, h2.pb { page-break-before: always; }
 h2 {
   font-size: 15pt; margin: 8mm 0 3mm 0; padding-bottom: 1.5mm;
-  border-bottom: 0.6pt solid #d1d5db;
+  border-bottom: 0.6pt solid {$T['border']};
 }
-h3 { font-size: 12.6pt; margin: 6mm 0 2.2mm 0; color: #5b21b6; }
-h4 { font-size: 11.3pt; margin: 4.5mm 0 1.8mm 0; color: #6d28d9; }
-h5, h6 { font-size: 10.9pt; margin: 4mm 0 1.5mm 0; color: #6d28d9; }
+h3 { font-size: 12.6pt; margin: 6mm 0 2.2mm 0; color: {$T['primary_dark']}; }
+h4 { font-size: 11.3pt; margin: 4.5mm 0 1.8mm 0; color: {$T['primary_mid']}; }
+h5, h6 { font-size: 10.9pt; margin: 4mm 0 1.5mm 0; color: {$T['primary_mid']}; }
 
 /* ---------- Text ---------- */
 p { margin: 0 0 2.8mm 0; text-align: justify; }
 ul, ol { margin: 1mm 0 3.2mm 0; padding-left: 6mm; }
 li { margin-bottom: 1.4mm; line-height: 1.5; }
 li.task { list-style: none; margin-left: -4mm; }
-li.task .cb { color: #5b21b6; font-size: 11.5pt; }
+li.task .cb { color: {$T['primary_dark']}; font-size: 11.5pt; }
 
-strong { color: #4c1d95; }
+strong { color: {$T['primary']}; }
 em { font-style: italic; }
-del { text-decoration: line-through; color: #6b7280; }
+del { text-decoration: line-through; color: {$T['muted']}; }
 sup.fnref { font-size: 7pt; vertical-align: super; line-height: 0; }
-sup.fnref a { color: #6c5ce7; text-decoration: none; font-weight: 700; }
+sup.fnref a { color: {$T['accent']}; text-decoration: none; font-weight: 700; }
 
 code {
   font-family: "jetbrainsmono", monospace; font-size: 9.2pt;
-  background: #f3f0ff; border: 0.4pt solid #e0d7fa; border-radius: 2pt;
-  padding: 0 3pt; color: #5b21b6;
+  background: {$T['surface']}; border: 0.4pt solid {$T['surface_border']}; border-radius: 2pt;
+  padding: 0 3pt; color: {$T['primary_dark']};
 }
 
-a { color: #6c5ce7; text-decoration: underline; }
-.xref { color: #5b21b6; font-style: italic; }
+a { color: {$T['link']}; text-decoration: underline; }
+.xref { color: {$T['primary_dark']}; font-style: italic; }
 
 /* ---------- Callout / blockquote ---------- */
 .callout {
   margin: 3.5mm 0; padding: 3mm 5mm 1.5mm 5mm;
-  background: #f3f0ff; border-left: 3pt solid #6c5ce7; border-radius: 2pt;
+  background: {$T['callout_bg']}; border-left: 3pt solid {$T['callout_border']}; border-radius: 2pt;
   page-break-inside: avoid;
 }
 .callout p { margin: 0 0 2mm 0; }
 .callout ul, .callout ol { margin: 1mm 0 2mm 0; }
-.callout h3, .callout h4 { margin: 0 0 2mm 0; color: #4c1d95; }
-.callout-warn { background: #fdf3ec; border-left-color: #d97706; }
-.callout-warn strong { color: #b45309; }
+.callout h3, .callout h4 { margin: 0 0 2mm 0; color: {$T['primary']}; }
+.callout-warn { background: {$T['warn_bg']}; border-left-color: {$T['warn_border']}; }
+.callout-warn strong { color: {$T['warn_fg']}; }
 
-hr { border: none; border-top: 0.6pt solid #d1d5db; margin: 5mm 0; }
+hr { border: none; border-top: 0.6pt solid {$T['border']}; margin: 5mm 0; }
 
 /* ---------- Tabulky ---------- */
 table.md-tab {
@@ -851,28 +1153,31 @@ table.md-tab {
   overflow-wrap: break-word; word-wrap: break-word; word-break: break-word;
 }
 table.md-tab th {
-  background: #4c1d95; color: #ffffff; font-weight: 700;
-  padding: 1.8mm 2.4mm; border: 0.4pt solid #4c1d95; text-align: left;
+  background: {$T['primary']}; color: #ffffff; font-weight: 700;
+  padding: 1.8mm 2.4mm; border: 0.4pt solid {$T['primary']}; text-align: left;
 }
+/* tučný text v hlavičce tabulky musí zůstat čitelný (jinak barevný strong na
+   stejně barevném pozadí = neviditelný); zděď bílou barvu z th. */
+table.md-tab th strong, table.md-tab th b { color: #ffffff; }
 table.md-tab td {
-  padding: 1.6mm 2.4mm; border: 0.4pt solid #d1d5db; vertical-align: top;
+  padding: 1.6mm 2.4mm; border: 0.4pt solid {$T['border']}; vertical-align: top;
   overflow-wrap: break-word; word-wrap: break-word;
 }
-table.md-tab tr:nth-child(even) td { background: #faf8ff; }
+table.md-tab tr:nth-child(even) td { background: {$T['table_zebra']}; }
 
 /* ---------- Obrázky ---------- */
 .fig { margin: 3mm 0 4mm 0; page-break-inside: avoid; text-align: center; }
 .fig img {
-  max-width: 100%; border: 0.6pt solid #d1d5db; border-radius: 2pt;
+  max-width: 100%; border: 0.6pt solid {$T['border']}; border-radius: 2pt;
   padding: 2mm; background: #fff;
 }
-.fig-caption { margin-top: 1.5mm; font-size: 8.8pt; color: #6b7280; font-style: italic; }
+.fig-caption { margin-top: 1.5mm; font-size: 8.8pt; color: {$T['muted']}; font-style: italic; }
 /* popisek pod obrázkem zapsaný jako samostatný *kurzívový* řádek za obrázkem */
-.fig-cap { text-align: center; margin: -1mm 0 4.5mm 0; color: #6b7280; font-size: 9.2pt; }
+.fig-cap { text-align: center; margin: -1mm 0 4.5mm 0; color: {$T['muted']}; font-size: 9.2pt; }
 
 /* ---------- Fenced code / ASCII diagramy (tmavé, vzdušné) ---------- */
 pre.code-block {
-  background: #1e1e2e; color: #cdd6f4;
+  background: {$T['code_bg']}; color: {$T['code_fg']};
   border-radius: 3pt;
   padding: 3.2mm 4mm; margin: 2.8mm 0 4mm 0;
   font-family: "jetbrainsmono", monospace; font-size: {$cf}pt;
@@ -886,26 +1191,26 @@ pre.code-block code {
 
 /* ---------- Glyph náhrady ---------- */
 .g-warn { font-family: "dejavusans", sans-serif; }
-.g-ok  { color: #16a34a; font-weight: 700; }
-.g-no  { color: #dc2626; font-weight: 700; }
-.g-ph2 { color: #e08e0b; }
-.g-ph3 { color: #2f7fc9; }
-.lbl   { color: #5b21b6; }
+.g-ok  { color: {$T['ok']}; font-weight: 700; }
+.g-no  { color: {$T['no']}; font-weight: 700; }
+.g-ph2 { color: {$T['amber2']}; }
+.g-ph3 { color: {$T['info2']}; }
+.lbl   { color: {$T['primary_dark']}; }
 
 /* Barevné stavové puntíky (🟢🟡🔴⚪…) */
 .g-dot { font-size: 0.9em; line-height: 1; }
-.g-dot-green { color: #16a34a; }
-.g-dot-amber { color: #d97706; }
-.g-dot-red   { color: #dc2626; }
-.g-dot-blue  { color: #2563eb; }
-.g-dot-gray  { color: #9ca3af; }
+.g-dot-green { color: {$T['ok']}; }
+.g-dot-amber { color: {$T['amber']}; }
+.g-dot-red   { color: {$T['no']}; }
+.g-dot-blue  { color: {$T['info']}; }
+.g-dot-gray  { color: {$T['gray']}; }
 
 /* ---------- Poznámky pod čarou ---------- */
-hr.fn-sep { border: none; border-top: 0.6pt solid #d1d5db; margin: 7mm 0 3mm 0; }
-.footnotes { font-size: 9pt; color: #4b5563; line-height: 1.45; }
+hr.fn-sep { border: none; border-top: 0.6pt solid {$T['border']}; margin: 7mm 0 3mm 0; }
+.footnotes { font-size: 9pt; color: {$T['muted2']}; line-height: 1.45; }
 .footnotes ol { padding-left: 6mm; margin: 0; }
 .footnotes li { margin-bottom: 1.2mm; }
-.fn-back { text-decoration: none; color: #6c5ce7; }
+.fn-back { text-decoration: none; color: {$T['link']}; }
 CSS;
 }
 
@@ -1009,6 +1314,7 @@ function mermaidPuppeteerConfig(): ?string
 function renderMermaidToPng(string $src, string $mmdc): ?string
 {
     global $CFG, $TOOLS_DIR;
+    $src   = configTextReplaceMermaid($src);   // normalizace i v popiscích diagramů
     $theme = (string) ($CFG['mermaid']['theme'] ?? 'default');
     $bg    = (string) ($CFG['mermaid']['background'] ?? 'white');
     $scale = (string) ($CFG['mermaid']['scale'] ?? 2.5);
@@ -1038,7 +1344,17 @@ function renderMermaidToPng(string $src, string $mmdc): ?string
     if ($rc === 0 && is_file($png) && filesize($png) > 0) {
         return str_replace('\\', '/', $png);
     }
+    warnMermaidFailed($o);
     return null;
+}
+
+// Selhaný diagram degraduje na code block — bez hlášky je to tichá ztráta
+// obsahu (typicky když 'text_replace_mermaid' rozbije syntaxi).
+function warnMermaidFailed(array $out): void
+{
+    $msg = trim(implode(' ', array_slice($out, 0, 3)));
+    fwrite(STDERR, "  (mermaid: diagram se nevykreslil → ponechán jako code block"
+        . ($msg !== '' ? '; ' . mb_strimwidth($msg, 0, 160, '…') : '') . ")\n");
 }
 
 function preprocessMermaid(string $md): string
@@ -1113,6 +1429,7 @@ function ghostscriptExe(): ?string
 function renderMermaidToSvg(string $src, string $mmdc): ?string
 {
     global $CFG, $TOOLS_DIR;
+    $src   = configTextReplaceMermaid($src);   // normalizace i v popiscích diagramů
     $theme = (string) ($CFG['mermaid']['theme'] ?? 'default');
     $bg    = (string) ($CFG['mermaid']['background'] ?? 'white');
     $cacheDir = $TOOLS_DIR . DIRECTORY_SEPARATOR . '.mermaid-cache';
@@ -1129,7 +1446,9 @@ function renderMermaidToSvg(string $src, string $mmdc): ?string
     if ($pptr !== null) { $args[] = '-p'; $args[] = $pptr; }
     $cmd = implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1';
     @exec($cmd, $o, $rc);
-    return ($rc === 0 && is_file($svgPath) && filesize($svgPath) > 0) ? $svgPath : null;
+    if ($rc === 0 && is_file($svgPath) && filesize($svgPath) > 0) { return $svgPath; }
+    warnMermaidFailed($o);
+    return null;
 }
 
 // fence s volitelnými atributy v info-stringu: ```mermaid height=120mm
@@ -1222,7 +1541,7 @@ function gsPageCount(string $gs, string $pdf): int
 
 function renderDocumentChrome(string $mdPath): array
 {
-    global $OUT_DIR, $SRC_DIR, $AUTHOR, $COMPANY, $BRAND, $CFG, $TOOLS_DIR;
+    global $OUT_DIR, $OUT_SUFFIX, $SRC_DIR, $AUTHOR, $COMPANY, $BRAND, $CFG, $TOOLS_DIR;
 
     $chrome = chromeExe();
     $gs     = ghostscriptExe();
@@ -1236,7 +1555,7 @@ function renderDocumentChrome(string $mdPath): array
 
     $meta  = parseMeta($md);
     $split = splitTitle($md);
-    $title = $split['title'];
+    $title = configTextReplaceText($split['title']);   // titulka/hlavička/metadata stejně jako tělo
 
     // poznámky pod čarou: vyřízni definice, očísluj reference (před parserem)
     $fn = preprocessFootnotes($split['body']);
@@ -1301,6 +1620,7 @@ function renderDocumentChrome(string $mdPath): array
                   . htmlspecialchars($r[0], ENT_QUOTES, 'UTF-8') . '</td>'
                   . '<td class="cover-meta-value">' . $r[1] . '</td></tr>';
     }
+    $metaRows = configTextReplaceHtml($metaRows);
     $dkRaw   = (string) ($CFG['doc_kind'] ?? '');
     $dk      = htmlspecialchars($dkRaw, ENT_QUOTES, 'UTF-8');
     $eyebrow = $BRAND !== ''
@@ -1357,7 +1677,7 @@ HTML;
     $coverCss = '@page{ size:A4; margin:0; }'
         // Bleed: band i body mírně přes okraj (overflow:hidden ořízne) — Chrome
         // při margin:0 občas nechá sub-pixel proužek vpravo; přesah ho přebije.
-        . 'html,body{ margin:0; padding:0; width:101%; height:297mm; overflow:hidden; background:#4c1d95; }'
+        . 'html,body{ margin:0; padding:0; width:101%; height:297mm; overflow:hidden; background:' . tc('cover_bg') . '; }'
         . '.cover{ page-break-after:auto; }'
         . '.cover-band{ box-sizing:border-box; width:101%; height:297mm; display:flex; flex-direction:column; }'
         . '.cover-logo-bottom{ margin-top:auto; text-align:center; padding-top:8mm; }'
@@ -1399,15 +1719,15 @@ HTML;
     $hComp  = htmlspecialchars($COMPANY, ENT_QUOTES, 'UTF-8');
     $footKind  = $dkRaw !== '' ? mb_strtolower($dkRaw, 'UTF-8') : '';
     $footRight = ($footKind !== '' ? htmlspecialchars($footKind, ENT_QUOTES, 'UTF-8') . ' &#183; ' : '') . $genDate;
-    $headerTpl = '<div style="font-family:Arial,sans-serif;font-size:8pt;color:#6b7280;width:100%;padding:0 18mm;box-sizing:border-box;">'
-        . '<table style="width:100%;border-collapse:collapse;border-bottom:0.5pt solid #d1d5db;"><tr>'
-        . '<td style="text-align:left;padding-bottom:1mm;"><span style="color:#4c1d95;font-weight:bold;">' . $hBrand . '</span>'
+    $headerTpl = '<div style="font-family:Arial,sans-serif;font-size:8pt;color:' . tc('muted') . ';width:100%;padding:0 18mm;box-sizing:border-box;">'
+        . '<table style="width:100%;border-collapse:collapse;border-bottom:0.5pt solid ' . tc('border') . ';"><tr>'
+        . '<td style="text-align:left;padding-bottom:1mm;"><span style="color:' . tc('primary') . ';font-weight:bold;">' . $hBrand . '</span>'
         . ($hBrand !== '' ? ' &#183; ' : '') . $hTitle . '</td>'
-        . '<td style="text-align:right;color:#4c1d95;font-weight:bold;padding-bottom:1mm;width:40mm;">' . $hComp . '</td>'
+        . '<td style="text-align:right;color:' . tc('primary') . ';font-weight:bold;padding-bottom:1mm;width:40mm;">' . $hComp . '</td>'
         . '</tr></table></div>';
-    $footerTpl = '<div style="font-family:Arial,sans-serif;font-size:8pt;color:#6b7280;width:100%;padding:0 18mm;box-sizing:border-box;">'
-        . '<table style="width:100%;border-collapse:collapse;border-top:0.5pt solid #d1d5db;"><tr>'
-        . '<td style="text-align:left;color:#4c1d95;font-weight:bold;padding-top:1mm;">' . $hComp . '</td>'
+    $footerTpl = '<div style="font-family:Arial,sans-serif;font-size:8pt;color:' . tc('muted') . ';width:100%;padding:0 18mm;box-sizing:border-box;">'
+        . '<table style="width:100%;border-collapse:collapse;border-top:0.5pt solid ' . tc('border') . ';"><tr>'
+        . '<td style="text-align:left;color:' . tc('primary') . ';font-weight:bold;padding-top:1mm;">' . $hComp . '</td>'
         . '<td style="text-align:center;padding-top:1mm;">' . $pageLabel . ' <span class="pageNumber"></span> / <span class="totalPages"></span></td>'
         . '<td style="text-align:right;padding-top:1mm;">' . $footRight . '</td>'
         . '</tr></table></div>';
@@ -1457,7 +1777,7 @@ HTML;
     $pages = gsPageCount($gs, $tmpFinal);
 
     // ---- atomický zápis do output_dir (retry kvůli Windows zámkům) ----
-    $outPath = $OUT_DIR . DIRECTORY_SEPARATOR . $base . '.pdf';
+    $outPath = $OUT_DIR . DIRECTORY_SEPARATOR . $base . $OUT_SUFFIX . '.pdf';
     $pdfData = file_get_contents($tmpFinal);
     $written = false; $lastErr = '';
     for ($attempt = 0; $attempt < 8; $attempt++) {
@@ -1485,7 +1805,7 @@ HTML;
 // =====================================================================
 function renderDocument(string $mdPath): array
 {
-    global $OUT_DIR, $SRC_DIR, $AUTHOR, $COMPANY, $BRAND, $CFG, $TOOLS_DIR;
+    global $OUT_DIR, $OUT_SUFFIX, $SRC_DIR, $AUTHOR, $COMPANY, $BRAND, $CFG, $TOOLS_DIR;
 
     $base = pathinfo($mdPath, PATHINFO_FILENAME);
     $md   = file_get_contents($mdPath);
@@ -1494,7 +1814,7 @@ function renderDocument(string $mdPath): array
 
     $meta  = parseMeta($md);
     $split = splitTitle($md);
-    $title = $split['title'];
+    $title = configTextReplaceText($split['title']);   // titulka/hlavička/metadata stejně jako tělo
 
     // poznámky pod čarou: vyřízni definice, očísluj reference (před parserem)
     $fn = preprocessFootnotes($split['body']);
@@ -1548,6 +1868,7 @@ function renderDocument(string $mdPath): array
                   . htmlspecialchars($r[0], ENT_QUOTES, 'UTF-8') . '</td>'
                   . '<td class="cover-meta-value">' . $r[1] . '</td></tr>';
     }
+    $metaRows = configTextReplaceHtml($metaRows);
 
     // eyebrow nad titulkem: „{doc_kind} · {brand}"
     $dkRaw   = (string) ($CFG['doc_kind'] ?? '');
@@ -1674,14 +1995,14 @@ HTML;
     // Hlavička: vlevo brand · titul, vpravo společnost (fialový branding)
     $hdrTitle = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
     $hdrBrand = $BRAND !== ''
-        ? '<span style="color:#4c1d95;font-weight:700;">' . htmlspecialchars($BRAND, ENT_QUOTES, 'UTF-8')
+        ? '<span style="color:' . tc('primary') . ';font-weight:700;">' . htmlspecialchars($BRAND, ENT_QUOTES, 'UTF-8')
           . '</span> &nbsp;&#183;&nbsp; '
         : '';
     $headerHtml =
-        '<table style="width:100%;border-bottom:0.5pt solid #d1d5db;'
-        . 'font-size:8pt;color:#6b7280;"><tr>'
+        '<table style="width:100%;border-bottom:0.5pt solid ' . tc('border') . ';'
+        . 'font-size:8pt;color:' . tc('muted') . ';"><tr>'
         . '<td style="text-align:left;">' . $hdrBrand . $hdrTitle . '</td>'
-        . '<td style="text-align:right;width:34mm;color:#4c1d95;font-weight:700;">'
+        . '<td style="text-align:right;width:34mm;color:' . tc('primary') . ';font-weight:700;">'
         . htmlspecialchars($COMPANY, ENT_QUOTES, 'UTF-8') . '</td>'
         . '</tr></table>';
 
@@ -1691,9 +2012,9 @@ HTML;
     $footRight  = ($footKind !== '' ? htmlspecialchars($footKind, ENT_QUOTES, 'UTF-8') . ' &#183; ' : '')
                 . $genDate;
     $footerHtml =
-        '<table style="width:100%;border-top:0.5pt solid #d1d5db;'
-        . 'font-size:8pt;color:#6b7280;padding-top:1mm;"><tr>'
-        . '<td style="text-align:left;color:#4c1d95;font-weight:700;">'
+        '<table style="width:100%;border-top:0.5pt solid ' . tc('border') . ';'
+        . 'font-size:8pt;color:' . tc('muted') . ';padding-top:1mm;"><tr>'
+        . '<td style="text-align:left;color:' . tc('primary') . ';font-weight:700;">'
         . htmlspecialchars($COMPANY, ENT_QUOTES, 'UTF-8') . '</td>'
         . '<td style="text-align:center;">' . $pageLabel . ' {PAGENO} / {nbpg}</td>'
         . '<td style="text-align:right;">' . $footRight . '</td>'
@@ -1737,7 +2058,7 @@ HTML;
         $mpdf->WriteHTML($bodyHtml, \Mpdf\HTMLParserMode::HTML_BODY);
     }
 
-    $outPath = $OUT_DIR . DIRECTORY_SEPARATOR . $base . '.pdf';
+    $outPath = $OUT_DIR . DIRECTORY_SEPARATOR . $base . $OUT_SUFFIX . '.pdf';
     // Render do paměti a zapiš atomicky s retry — Windows občas drží zámek na
     // cílovém PDF (antivir / náhledový handler / GhostScript) → "Resource
     // temporarily unavailable". Retry to spolehlivě obejde.
@@ -1904,7 +2225,7 @@ function combineCoverParts(): array
 {
     global $CFG, $AUTHOR, $COMPANY, $BRAND;
     $C        = $CFG['combine'] ?? [];
-    $title    = htmlspecialchars((string) ($C['title'] ?? ($CFG['strings']['default_title'] ?? 'Dokument')), ENT_QUOTES, 'UTF-8');
+    $title    = htmlspecialchars(configTextReplaceText((string) ($C['title'] ?? ($CFG['strings']['default_title'] ?? 'Dokument'))), ENT_QUOTES, 'UTF-8');
     $subtitle = (string) ($C['subtitle'] ?? '');
     $purpose  = $subtitle !== ''
         ? '<div class="cover-purpose">' . applyGlyphSubstitutions(mdInline($subtitle)) . '</div>'
@@ -1938,7 +2259,8 @@ function combineCoverParts(): array
                   . htmlspecialchars((string) $r[0], ENT_QUOTES, 'UTF-8') . '</td>'
                   . '<td class="cover-meta-value">' . $r[1] . '</td></tr>';
     }
-    return ['eyebrow' => $eyebrow, 'title' => $title, 'purpose' => $purpose, 'metaRows' => $metaRows];
+    return ['eyebrow' => $eyebrow, 'title' => $title, 'purpose' => $purpose,
+            'metaRows' => configTextReplaceHtml($metaRows)];
 }
 
 // Průběžný obsah pro combine (H1 kapitoly tučně, H2 sekce odsazené).
@@ -1961,9 +2283,9 @@ function combineTocHtml(array $toc): string
 function combineTocCss(): string
 {
     return '.toc-h1 { margin: 4mm 0 1mm 0; font-size: 12pt; font-weight: 700; }'
-        . '.toc-h1 a { color: #4c1d95; text-decoration: none; }'
+        . '.toc-h1 a { color: ' . tc('primary') . '; text-decoration: none; }'
         . '.toc-h2-sub { margin: 1mm 0 1mm 6mm; font-size: 10.2pt; }'
-        . '.toc-h2-sub a { color: #4b5563; text-decoration: none; }';
+        . '.toc-h2-sub a { color: ' . tc('muted2') . '; text-decoration: none; }';
 }
 
 // ---- NATIVNÍ mPDF TOC (jen mpdf renderer): tečky + čísla stránek -----------
@@ -1976,16 +2298,16 @@ function mpdfTocCss(): string
     // Text položky je v <span class="mpdf_toc_t_level_N"> (uvnitř <a>), takže
     // přebití tučnosti/italiky MUSÍ cílit přímo na tyto spany — div/a se na text
     // nedostane. Stejná specificita + pozdější pořadí = naše pravidla vyhrají.
-    return '.toc-title { color:#4c1d95; font-size:17pt; font-weight:700; margin:0 0 5mm 0; }'
-        // úroveň 0 = kapitoly: accent purpurová, tučné
+    return '.toc-title { color:' . tc('primary') . '; font-size:17pt; font-weight:700; margin:0 0 5mm 0; }'
+        // úroveň 0 = kapitoly: primární barva tématu, tučné
         . 'div.mpdf_toc_level_0 { margin:1.6mm 0 0.6mm 0; font-size:9.6pt; }'
         . 'a.mpdf_toc_a { text-decoration:none; }'
-        . 'span.mpdf_toc_t_level_0 { font-weight:bold; font-style:normal; color:#4c1d95; }'
-        . 'span.mpdf_toc_p_level_0 { font-weight:bold; font-style:normal; color:#4c1d95; }'
+        . 'span.mpdf_toc_t_level_0 { font-weight:bold; font-style:normal; color:' . tc('primary') . '; }'
+        . 'span.mpdf_toc_p_level_0 { font-weight:bold; font-style:normal; color:' . tc('primary') . '; }'
         // úroveň 1 = podkapitoly: OBYČEJNÉ, bez italiky a bez tučného
         . 'div.mpdf_toc_level_1 { margin:0.6mm 0 0.6mm 6mm; font-size:8.8pt; }'
-        . 'span.mpdf_toc_t_level_1 { font-weight:normal; font-style:normal; color:#4b5563; }'
-        . 'span.mpdf_toc_p_level_1 { font-weight:normal; font-style:normal; color:#4b5563; }';
+        . 'span.mpdf_toc_t_level_1 { font-weight:normal; font-style:normal; color:' . tc('muted2') . '; }'
+        . 'span.mpdf_toc_p_level_1 { font-weight:normal; font-style:normal; color:' . tc('muted2') . '; }';
 }
 
 // Sestaví tělo s nativním mPDF TOC: před každý nadpis odpovídající TOC položce
@@ -2020,6 +2342,39 @@ function mpdfNativeTocBody(string $bodyHtml, array $entries, string $tocTitle): 
         . ' toc-odd-header-value="-1" toc-even-header-value="-1"'
         . ' toc-odd-footer-value="-1" toc-even-footer-value="-1"'
         . ' toc-preHTML="' . $pre . '" links="on" />' . $bodyHtml;
+}
+
+/**
+ * Zapíše velké HTML po blocích ukončených na bezpečné hranici nadpisu. mPDF uvnitř
+ * AdjustHTML používá PCRE nad celým vstupem jednoho WriteHTML(); rozsáhlý combine
+ * dokument proto může překročit pcre.backtrack_limit, i když je výsledné HTML platné.
+ */
+function mpdfWriteHtmlChunks(\Mpdf\Mpdf $mpdf, string $html, int $maxBytes = 250000): void
+{
+    $parts = preg_split('~(?=<tocentry\b)~u', $html, -1, PREG_SPLIT_NO_EMPTY);
+    if ($parts === false || count($parts) < 2) {
+        $parts = preg_split('~(?=<h[1-6]\b)~u', $html, -1, PREG_SPLIT_NO_EMPTY);
+    }
+    if ($parts === false || $parts === []) {
+        $parts = [$html];
+    }
+
+    $chunks = [];
+    $chunk = '';
+    foreach ($parts as $part) {
+        if ($chunk !== '' && strlen($chunk) + strlen($part) > $maxBytes) {
+            $chunks[] = $chunk;
+            $chunk = '';
+        }
+        $chunk .= $part;
+    }
+    if ($chunk !== '') {
+        $chunks[] = $chunk;
+    }
+
+    foreach ($chunks as $htmlChunk) {
+        $mpdf->WriteHTML($htmlChunk, \Mpdf\HTMLParserMode::HTML_BODY);
+    }
 }
 
 // ---- COMBINE: mPDF renderer -------------------------------------------
@@ -2127,12 +2482,12 @@ HTML;
     $dkRaw    = (string) ($CFG['doc_kind'] ?? '');
     $hdrTitle = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
     $hdrBrand = $BRAND !== ''
-        ? '<span style="color:#4c1d95;font-weight:700;">' . htmlspecialchars($BRAND, ENT_QUOTES, 'UTF-8') . '</span> &nbsp;&#183;&nbsp; '
+        ? '<span style="color:' . tc('primary') . ';font-weight:700;">' . htmlspecialchars($BRAND, ENT_QUOTES, 'UTF-8') . '</span> &nbsp;&#183;&nbsp; '
         : '';
     $headerHtml =
-        '<table style="width:100%;border-bottom:0.5pt solid #d1d5db;font-size:8pt;color:#6b7280;"><tr>'
+        '<table style="width:100%;border-bottom:0.5pt solid ' . tc('border') . ';font-size:8pt;color:' . tc('muted') . ';"><tr>'
         . '<td style="text-align:left;">' . $hdrBrand . $hdrTitle . '</td>'
-        . '<td style="text-align:right;width:34mm;color:#4c1d95;font-weight:700;">'
+        . '<td style="text-align:right;width:34mm;color:' . tc('primary') . ';font-weight:700;">'
         . htmlspecialchars($COMPANY, ENT_QUOTES, 'UTF-8') . '</td>'
         . '</tr></table>';
 
@@ -2140,8 +2495,8 @@ HTML;
     $footKind  = $dkRaw !== '' ? mb_strtolower($dkRaw, 'UTF-8') : '';
     $footRight = ($footKind !== '' ? htmlspecialchars($footKind, ENT_QUOTES, 'UTF-8') . ' &#183; ' : '') . $genDate;
     $footerHtml =
-        '<table style="width:100%;border-top:0.5pt solid #d1d5db;font-size:8pt;color:#6b7280;padding-top:1mm;"><tr>'
-        . '<td style="text-align:left;color:#4c1d95;font-weight:700;">'
+        '<table style="width:100%;border-top:0.5pt solid ' . tc('border') . ';font-size:8pt;color:' . tc('muted') . ';padding-top:1mm;"><tr>'
+        . '<td style="text-align:left;color:' . tc('primary') . ';font-weight:700;">'
         . htmlspecialchars($COMPANY, ENT_QUOTES, 'UTF-8') . '</td>'
         . '<td style="text-align:center;">' . $pageLabel . ' {PAGENO} / {nbpg}</td>'
         . '<td style="text-align:right;">' . $footRight . '</td>'
@@ -2166,9 +2521,9 @@ HTML;
         'ohvalue' => 1, 'ehvalue' => 1, 'ofvalue' => 1, 'efvalue' => 1,
         'resetpagenum' => 1,
     ]);
-    $mpdf->WriteHTML(
+    mpdfWriteHtmlChunks(
+        $mpdf,
         mpdfNativeTocBody($bodyHtml, $toc, (string) ($CFG['strings']['toc_title'] ?? 'Obsah')),
-        \Mpdf\HTMLParserMode::HTML_BODY,
     );
 
     $outName = (string) ($CFG['combine']['output'] ?? 'combined.pdf');
@@ -2251,7 +2606,7 @@ HTML;
         . '@font-face{font-family:"jetbrainsmono";src:url("file:///' . $fontsDir . '/JetBrainsMono-Bold.ttf");font-weight:bold;font-display:block;}'
         . '*{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }';
     $coverCss = '@page{ size:A4; margin:0; }'
-        . 'html,body{ margin:0; padding:0; width:101%; height:297mm; overflow:hidden; background:#4c1d95; }'
+        . 'html,body{ margin:0; padding:0; width:101%; height:297mm; overflow:hidden; background:' . tc('cover_bg') . '; }'
         . '.cover{ page-break-after:auto; }'
         . '.cover-band{ box-sizing:border-box; width:101%; height:297mm; display:flex; flex-direction:column; }'
         . '.cover-logo-bottom{ margin-top:auto; text-align:center; padding-top:8mm; }'
@@ -2291,15 +2646,15 @@ HTML;
     $hComp  = htmlspecialchars($COMPANY, ENT_QUOTES, 'UTF-8');
     $footKind  = $dkRaw !== '' ? mb_strtolower($dkRaw, 'UTF-8') : '';
     $footRight = ($footKind !== '' ? htmlspecialchars($footKind, ENT_QUOTES, 'UTF-8') . ' &#183; ' : '') . $genDate;
-    $headerTpl = '<div style="font-family:Arial,sans-serif;font-size:8pt;color:#6b7280;width:100%;padding:0 18mm;box-sizing:border-box;">'
-        . '<table style="width:100%;border-collapse:collapse;border-bottom:0.5pt solid #d1d5db;"><tr>'
-        . '<td style="text-align:left;padding-bottom:1mm;"><span style="color:#4c1d95;font-weight:bold;">' . $hBrand . '</span>'
+    $headerTpl = '<div style="font-family:Arial,sans-serif;font-size:8pt;color:' . tc('muted') . ';width:100%;padding:0 18mm;box-sizing:border-box;">'
+        . '<table style="width:100%;border-collapse:collapse;border-bottom:0.5pt solid ' . tc('border') . ';"><tr>'
+        . '<td style="text-align:left;padding-bottom:1mm;"><span style="color:' . tc('primary') . ';font-weight:bold;">' . $hBrand . '</span>'
         . ($hBrand !== '' ? ' &#183; ' : '') . $hTitle . '</td>'
-        . '<td style="text-align:right;color:#4c1d95;font-weight:bold;padding-bottom:1mm;width:40mm;">' . $hComp . '</td>'
+        . '<td style="text-align:right;color:' . tc('primary') . ';font-weight:bold;padding-bottom:1mm;width:40mm;">' . $hComp . '</td>'
         . '</tr></table></div>';
-    $footerTpl = '<div style="font-family:Arial,sans-serif;font-size:8pt;color:#6b7280;width:100%;padding:0 18mm;box-sizing:border-box;">'
-        . '<table style="width:100%;border-collapse:collapse;border-top:0.5pt solid #d1d5db;"><tr>'
-        . '<td style="text-align:left;color:#4c1d95;font-weight:bold;padding-top:1mm;">' . $hComp . '</td>'
+    $footerTpl = '<div style="font-family:Arial,sans-serif;font-size:8pt;color:' . tc('muted') . ';width:100%;padding:0 18mm;box-sizing:border-box;">'
+        . '<table style="width:100%;border-collapse:collapse;border-top:0.5pt solid ' . tc('border') . ';"><tr>'
+        . '<td style="text-align:left;color:' . tc('primary') . ';font-weight:bold;padding-top:1mm;">' . $hComp . '</td>'
         . '<td style="text-align:center;padding-top:1mm;">' . $pageLabel . ' <span class="pageNumber"></span> / <span class="totalPages"></span></td>'
         . '<td style="text-align:right;padding-top:1mm;">' . $footRight . '</td>'
         . '</tr></table></div>';
@@ -2443,7 +2798,7 @@ echo str_repeat('-', 64) . "\n";
 echo "Hotovo: " . count($results) . " PDF.\n";
 foreach ($results as $r) {
     printf("  %-28s %s  (v%s, %s)  -> %d str\n",
-        $r['base'] . '.pdf',
+        basename($r['out']),
         str_pad((string)$r['size_kb'] . ' kB', 10),
         $r['version'] ?? '?',
         $r['date'] ?? '?',
